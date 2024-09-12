@@ -9,6 +9,7 @@
 #include <QGraphicsScene>
 #include <QListWidget>
 #include <QVector>
+#include <QLabel>
 #include <exception>
 
 class Entity;
@@ -29,6 +30,8 @@ private slots:
     void onSceneViewMousePress(QMouseEvent *event);
 
 private:
+    void highlightSelectedTile();
+    void drawGridOnSpritesheet();
     void setupUI();
     void createActions();
     void createMenus();
@@ -42,6 +45,7 @@ private:
     void placeEntityInScene(const QPointF &pos);
     bool eventFilter(QObject *watched, QEvent *event) override;
     void handleException(const QString &context, const std::exception &e);
+    void handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos);
 
     QTreeView *m_projectExplorer;
     QFileSystemModel *m_fileSystemModel;
@@ -56,6 +60,8 @@ private:
     Entity *m_selectedEntity;
     int m_selectedTileIndex;
     QGraphicsPixmapItem *m_entityPreview;
+
+    QLabel *m_spritesheetLabel;
 };
 
 #endif // MAINWINDOW_H

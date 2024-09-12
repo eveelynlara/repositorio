@@ -3,6 +3,7 @@
 #include <QDir>
 #include <QDebug>
 #include <QFileInfo>
+#include <QElapsedTimer>
 
 EntityManager::EntityManager() {}
 
@@ -14,6 +15,12 @@ EntityManager::~EntityManager()
 
 void EntityManager::loadEntitiesFromDirectory(const QString &path)
 {
+    QElapsedTimer timer;
+    timer.start();
+
+    qDebug() << "Iniciando carregamento de entidades do diretório:" << path;
+    qDebug() << "Caminho absoluto:" << QDir(path).absolutePath();
+
     if (path.isEmpty()) {
         qWarning() << "Caminho do diretório vazio";
         return;
@@ -25,6 +32,11 @@ void EntityManager::loadEntitiesFromDirectory(const QString &path)
         return;
     }
 
+    // Limpar entidades existentes antes de carregar novas
+    qDebug() << "Limpando entidades existentes...";
+    qDeleteAll(m_entities);
+    m_entities.clear();
+
     QStringList filters;
     filters << "*.ent";
     QFileInfoList fileList = dir.entryInfoList(filters, QDir::Files);
@@ -34,11 +46,16 @@ void EntityManager::loadEntitiesFromDirectory(const QString &path)
         return;
     }
 
+    qDebug() << "Encontrados" << fileList.size() << "arquivos .ent no diretório";
+
+    int successfullyLoaded = 0;
     for (const QFileInfo &fileInfo : fileList)
     {
         QString name = fileInfo.baseName();
         QString filePath = fileInfo.filePath();
-        
+
+        qDebug() << "Processando arquivo:" << filePath;
+
         if (name.isEmpty()) {
             qWarning() << "Nome de arquivo inválido:" << filePath;
             continue;
@@ -47,14 +64,15 @@ void EntityManager::loadEntitiesFromDirectory(const QString &path)
         if (!m_entities.contains(name))
         {
             try {
+                qDebug() << "Criando nova entidade:" << name;
                 Entity *entity = new Entity(name, filePath);
-                if (entity->getPixmap().isNull() || entity->getSpriteDefinitions().isEmpty()) {
-                    qWarning() << "Falha ao carregar entidade:" << name;
-                    delete entity;
-                } else {
-                    m_entities[name] = entity;
-                    qDebug() << "Entidade carregada com sucesso:" << name;
-                }
+                // Removemos a verificação de pixmap nulo
+                m_entities[name] = entity;
+                successfullyLoaded++;
+                qDebug() << "Entidade carregada com sucesso:" << name
+                         << "- Tamanho do pixmap:" << entity->getPixmap().size()
+                         << "- Número de definições de sprite:" << entity->getSpriteDefinitions().size()
+                         << "- É invisível:" << entity->isInvisible();
             } catch (const std::exception& e) {
                 qWarning() << "Erro ao criar entidade:" << name << "-" << e.what();
             }
@@ -65,7 +83,18 @@ void EntityManager::loadEntitiesFromDirectory(const QString &path)
         }
     }
 
-    qDebug() << "Total de entidades carregadas:" << m_entities.size();
+    qDebug() << "Total de entidades carregadas com sucesso:" << successfullyLoaded << "de" << fileList.size() << "arquivos";
+
+    if (m_entities.isEmpty()) {
+        qWarning() << "Nenhuma entidade foi carregada com sucesso. Verifique o conteúdo dos arquivos .ent e os logs acima para mais detalhes.";
+    } else {
+        qDebug() << "Entidades carregadas:";
+        for (const QString &name : m_entities.keys()) {
+            qDebug() << "  -" << name;
+        }
+    }
+
+    qDebug() << "Tempo total de carregamento:" << timer.elapsed() << "ms";
 }
 
 Entity* EntityManager::getEntityByName(const QString &name) const

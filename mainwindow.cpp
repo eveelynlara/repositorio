@@ -12,6 +12,7 @@
 #include <QDebug>
 #include <QLoggingCategory>
 #include <QLabel>
+#include <QDir>
 
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
@@ -113,11 +114,31 @@ void MainWindow::setupTileList()
 {
     m_tileList = new QListWidget(this);
     QDockWidget *tileDock = new QDockWidget("Tiles", this);
-    tileDock->setWidget(m_tileList);
+
+    // Criar um widget de rolagem para conter o QLabel do spritesheet
+    QScrollArea *scrollArea = new QScrollArea();
+    scrollArea->setWidgetResizable(true);
+
+    // Criar um QLabel para mostrar o spritesheet
+    m_spritesheetLabel = new QLabel();
+    m_spritesheetLabel->setScaledContents(true);
+
+    scrollArea->setWidget(m_spritesheetLabel);
+
+    // Criar um layout vertical para conter o scrollArea e o m_tileList
+    QVBoxLayout *layout = new QVBoxLayout();
+    layout->addWidget(scrollArea);
+    layout->addWidget(m_tileList);
+
+    QWidget *containerWidget = new QWidget();
+    containerWidget->setLayout(layout);
+
+    tileDock->setWidget(containerWidget);
     tileDock->setAllowedAreas(Qt::AllDockWidgetAreas);
     addDockWidget(Qt::RightDockWidgetArea, tileDock);
 
-    connect(m_tileList, &QListWidget::itemClicked, this, &MainWindow::onTileItemClicked);
+    // Conectar o evento de clique do mouse no QLabel
+    m_spritesheetLabel->installEventFilter(this);
 }
 
 void MainWindow::createActions()
@@ -151,13 +172,29 @@ void MainWindow::loadEntities()
 {
     try {
         QString entitiesPath = m_projectPath + "/entities";
+        qCInfo(mainWindowCategory) << "Carregando entidades do diretório:" << entitiesPath;
+
+        QDir entitiesDir(entitiesPath);
+        if (!entitiesDir.exists()) {
+            qCWarning(mainWindowCategory) << "Diretório de entidades não encontrado:" << entitiesPath;
+            return;
+        }
+
         m_entityManager->loadEntitiesFromDirectory(entitiesPath);
 
         m_entityList->clear();
+        QStringList entityNames;
         for (Entity* entity : m_entityManager->getAllEntities()) {
+            entityNames << entity->getName();
             m_entityList->addItem(entity->getName());
         }
-        qCInfo(mainWindowCategory) << "Entidades carregadas com sucesso";
+        qCInfo(mainWindowCategory) << "Entidades carregadas:" << entityNames.join(", ");
+
+        if (m_entityList->count() == 0) {
+            qCWarning(mainWindowCategory) << "Nenhuma entidade foi carregada";
+        } else {
+            qCInfo(mainWindowCategory) << "Total de entidades carregadas:" << m_entityList->count();
+        }
     } catch (const std::exception& e) {
         handleException("Erro ao carregar entidades", e);
     }
@@ -166,8 +203,12 @@ void MainWindow::loadEntities()
 void MainWindow::onProjectItemDoubleClicked(const QModelIndex &index)
 {
     QString path = m_fileSystemModel->filePath(index);
-    // Aqui você pode adicionar lógica para abrir arquivos .ent ou .png
     qCInfo(mainWindowCategory) << "Arquivo clicado:" << path;
+
+    // Se o item clicado for o diretório "entities", recarregue as entidades
+    if (path.endsWith("/entities") || path.endsWith("\\entities")) {
+        loadEntities();
+    }
 }
 
 void MainWindow::onEntityItemClicked(QListWidgetItem *item)
@@ -210,10 +251,28 @@ void MainWindow::onTileItemClicked(QListWidgetItem *item)
     try {
         m_selectedTileIndex = tileIndex;
         updateEntityPreview();
+        highlightSelectedTile();
         qCInfo(mainWindowCategory) << "Tile selecionado:" << tileIndex;
     } catch (const std::exception& e) {
         handleException("Erro ao selecionar tile", e);
     }
+}
+
+void MainWindow::highlightSelectedTile()
+{
+    if (!m_selectedEntity) return;
+
+    QPixmap originalPixmap = m_selectedEntity->getPixmap();
+    QPixmap highlightPixmap = originalPixmap.copy();
+    QPainter painter(&highlightPixmap);
+    painter.setPen(QPen(Qt::red, 2));
+
+    const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+    if (m_selectedTileIndex >= 0 && m_selectedTileIndex < spriteDefinitions.size()) {
+        painter.drawRect(spriteDefinitions[m_selectedTileIndex]);
+    }
+
+    m_spritesheetLabel->setPixmap(highlightPixmap);
 }
 
 void MainWindow::updateEntityPreview()
@@ -230,28 +289,44 @@ void MainWindow::updateEntityPreview()
             m_entityPreview = nullptr;
         }
 
-        QPixmap pixmap = m_selectedEntity->getPixmap();
-        if (pixmap.isNull()) {
-            qCWarning(mainWindowCategory) << "Pixmap da entidade é nulo";
-            return;
-        }
-
+        QPixmap fullPixmap = m_selectedEntity->getPixmap();
         const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+
         if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
             qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
             return;
         }
 
         QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
-        QPixmap tilePixmap = pixmap.copy(spriteRect.toRect());
+        QPixmap tilePixmap = fullPixmap.copy(spriteRect.toRect());
 
         m_entityPreview = m_scene->addPixmap(tilePixmap);
         m_entityPreview->setOpacity(0.5);
         m_entityPreview->setFlag(QGraphicsItem::ItemIsMovable);
-        qCInfo(mainWindowCategory) << "Preview da entidade atualizado";
+        qCInfo(mainWindowCategory) << "Preview da entidade atualizado para o tile" << m_selectedTileIndex;
     } catch (const std::exception& e) {
         handleException("Erro ao atualizar preview da entidade", e);
     }
+}
+
+void MainWindow::drawGridOnSpritesheet()
+{
+    if (!m_selectedEntity) return;
+
+    QPixmap originalPixmap = m_selectedEntity->getPixmap();
+    QPixmap gridPixmap = originalPixmap.copy();
+    QPainter painter(&gridPixmap);
+    painter.setPen(QPen(Qt::red, 1, Qt::DotLine));
+
+    const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+
+    for (int i = 0; i < spriteDefinitions.size(); ++i) {
+        painter.drawRect(spriteDefinitions[i]);
+        painter.drawText(spriteDefinitions[i], Qt::AlignCenter, QString::number(i));
+    }
+
+    m_spritesheetLabel->setPixmap(gridPixmap);
+    qCInfo(mainWindowCategory) << "Grade desenhada com" << spriteDefinitions.size() << "sprites";
 }
 
 void MainWindow::updateTileList()
@@ -264,25 +339,38 @@ void MainWindow::updateTileList()
 
     try {
         QPixmap entityPixmap = m_selectedEntity->getPixmap();
-        if (entityPixmap.isNull()) {
-            qCWarning(mainWindowCategory) << "Pixmap da entidade é nulo";
-            return;
+
+        if (m_selectedEntity->isInvisible()) {
+            // Para entidades invisíveis, crie um pixmap com borda vermelha
+            QSizeF collisionSize = m_selectedEntity->getCollisionSize();
+            entityPixmap = QPixmap(collisionSize.toSize());
+            entityPixmap.fill(Qt::transparent);
+            QPainter painter(&entityPixmap);
+            painter.setPen(QPen(Qt::red, 2));
+            painter.drawRect(entityPixmap.rect().adjusted(1, 1, -1, -1));
+            painter.drawText(entityPixmap.rect(), Qt::AlignCenter, m_selectedEntity->getName());
         }
 
-        // Criar um QLabel para mostrar o spritesheet completo
-        QLabel* spritesheetLabel = new QLabel();
-        spritesheetLabel->setPixmap(entityPixmap);
-        spritesheetLabel->setScaledContents(true);
+        // Mostrar o spritesheet completo no QLabel
+        m_spritesheetLabel->setPixmap(entityPixmap);
+        m_spritesheetLabel->setFixedSize(entityPixmap.size());
 
-        // Adicionar o QLabel à lista de tiles
-        QListWidgetItem* item = new QListWidgetItem(m_tileList);
-        item->setSizeHint(entityPixmap.size());
-        m_tileList->setItemWidget(item, spritesheetLabel);
+        // Desenhar a grade no spritesheet
+        drawGridOnSpritesheet();
 
-        // Conectar o evento de clique do mouse no QLabel
-        spritesheetLabel->installEventFilter(this);
+        // Adicionar informações sobre os tiles à lista
+        const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+        for (int i = 0; i < spriteDefinitions.size(); ++i) {
+            QListWidgetItem* item = new QListWidgetItem(QString("Tile %1").arg(i));
+            item->setData(Qt::UserRole, i);
+            m_tileList->addItem(item);
+            qCInfo(mainWindowCategory) << "Adicionado tile" << i << ":" << spriteDefinitions[i];
+        }
 
-        qCInfo(mainWindowCategory) << "Spritesheet adicionado à lista de tiles";
+        qCInfo(mainWindowCategory) << "Spritesheet atualizado e lista de tiles preenchida";
+        qCInfo(mainWindowCategory) << "Número de tiles:" << spriteDefinitions.size();
+        qCInfo(mainWindowCategory) << "Tamanho do pixmap:" << entityPixmap.size();
+        qCInfo(mainWindowCategory) << "Entidade é invisível:" << m_selectedEntity->isInvisible();
     } catch (const std::exception& e) {
         handleException("Erro ao atualizar lista de tiles", e);
     }
@@ -296,14 +384,11 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             onSceneViewMousePress(mouseEvent);
             return true;
         }
-    } else if (event->type() == QEvent::MouseButtonPress) {
+    } else if (watched == m_spritesheetLabel && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent *mouseEvent = dynamic_cast<QMouseEvent*>(event);
         if (mouseEvent && mouseEvent->button() == Qt::LeftButton) {
-            QLabel* spritesheetLabel = qobject_cast<QLabel*>(watched);
-            if (spritesheetLabel) {
-                handleTileItemClick(spritesheetLabel, mouseEvent->pos());
-                return true;
-            }
+            handleTileItemClick(m_spritesheetLabel, mouseEvent->pos());
+            return true;
         }
     }
     return QMainWindow::eventFilter(watched, event);
@@ -323,20 +408,35 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
     }
 
     try {
-        QPixmap pixmap = m_selectedEntity->getPixmap();
-        if (pixmap.isNull()) {
-            qCWarning(mainWindowCategory) << "Pixmap da entidade é nulo";
-            return;
-        }
-
+        QPixmap fullPixmap = m_selectedEntity->getPixmap();
         const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+        QSizeF collisionSize = m_selectedEntity->getCollisionSize();
+
         if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
             qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
             return;
         }
 
         QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
-        QPixmap tilePixmap = pixmap.copy(spriteRect.toRect());
+        QPixmap tilePixmap;
+
+        if (m_selectedEntity->isInvisible()) {
+            // Para entidades invisíveis, crie um pixmap com borda vermelha
+            tilePixmap = QPixmap(collisionSize.toSize());
+            tilePixmap.fill(Qt::transparent);
+            QPainter painter(&tilePixmap);
+            painter.setPen(QPen(Qt::red, 2));
+            painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
+            painter.drawText(tilePixmap.rect(), Qt::AlignCenter, m_selectedEntity->getName());
+        } else {
+            // Use o tamanho da colisão para recortar o sprite, se disponível
+            if (collisionSize.isValid()) {
+                QRect sourceRect(spriteRect.topLeft().toPoint(), collisionSize.toSize());
+                tilePixmap = fullPixmap.copy(sourceRect);
+            } else {
+                tilePixmap = fullPixmap.copy(spriteRect.toRect());
+            }
+        }
 
         QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
         item->setPos(pos);
@@ -372,10 +472,14 @@ void MainWindow::handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos
     // Converter a posição do clique para as coordenadas do spritesheet original
     QPointF originalPos(pos.x() / scaleX, pos.y() / scaleY);
 
+    qCInfo(mainWindowCategory) << "Clique no spritesheet:" << originalPos;
+
     for (int i = 0; i < spriteDefinitions.size(); ++i) {
+        qCInfo(mainWindowCategory) << "Verificando sprite" << i << ":" << spriteDefinitions[i];
         if (spriteDefinitions[i].contains(originalPos)) {
             m_selectedTileIndex = i;
             updateEntityPreview();
+            m_tileList->setCurrentRow(i);
             qCInfo(mainWindowCategory) << "Tile selecionado:" << i;
             return;
         }
