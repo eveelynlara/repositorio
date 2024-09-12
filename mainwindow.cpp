@@ -13,6 +13,7 @@
 #include <QLoggingCategory>
 #include <QLabel>
 #include <QDir>
+#include <QXmlStreamWriter>
 
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
@@ -45,6 +46,12 @@ void MainWindow::setupUI()
     projectDock->setWidget(m_projectExplorer);
     projectDock->setAllowedAreas(Qt::AllDockWidgetAreas);
     addDockWidget(Qt::LeftDockWidgetArea, projectDock);
+
+    QAction* exportAction = new QAction("Exportar Cena", this);
+    connect(exportAction, &QAction::triggered, this, &MainWindow::exportScene);
+
+    QMenu* fileMenu = menuBar()->addMenu("Arquivo");
+    fileMenu->addAction(exportAction);
 
     // Configurar o explorador de projetos
     setupProjectExplorer();
@@ -406,20 +413,16 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
         qCWarning(mainWindowCategory) << "Nenhuma entidade selecionada para colocar na cena";
         return;
     }
-
     try {
         QPixmap fullPixmap = m_selectedEntity->getPixmap();
         const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
         QSizeF collisionSize = m_selectedEntity->getCollisionSize();
-
         if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
             qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
             return;
         }
-
         QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
         QPixmap tilePixmap;
-
         if (m_selectedEntity->isInvisible()) {
             // Para entidades invisíveis, crie um pixmap com borda vermelha
             tilePixmap = QPixmap(collisionSize.toSize());
@@ -437,11 +440,17 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
                 tilePixmap = fullPixmap.copy(spriteRect.toRect());
             }
         }
-
         QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
         item->setPos(pos);
         item->setFlag(QGraphicsItem::ItemIsMovable);
         item->setFlag(QGraphicsItem::ItemIsSelectable);
+
+        // Armazene a referência à entidade e ao índice do tile
+        EntityPlacement placement;
+        placement.entity = m_selectedEntity;
+        placement.tileIndex = m_selectedTileIndex;
+        m_entityPlacements[item] = placement;
+
         qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << pos;
     } catch (const std::exception& e) {
         handleException("Erro ao colocar entidade na cena", e);
@@ -453,6 +462,87 @@ void MainWindow::handleException(const QString &context, const std::exception &e
     QString errorMessage = QString("%1: %2").arg(context).arg(e.what());
     qCCritical(mainWindowCategory) << errorMessage;
     QMessageBox::critical(this, "Erro", errorMessage);
+}
+
+void MainWindow::exportScene()
+{
+    QString fileName = QFileDialog::getSaveFileName(this, tr("Exportar Cena"), "", tr("Arquivos de Cena (*.esc);;Todos os Arquivos (*)"));
+    if (fileName.isEmpty())
+        return;
+
+    QFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("Erro"), tr("Não foi possível abrir o arquivo para escrita."));
+        return;
+    }
+
+    QXmlStreamWriter xml(&file);
+    xml.setAutoFormatting(true);
+    xml.writeStartDocument();
+
+    xml.writeStartElement("Ethanon");
+
+    // Escrever propriedades da cena
+    xml.writeStartElement("SceneProperties");
+    xml.writeAttribute("lightIntensity", "2");
+    xml.writeAttribute("parallaxIntensity", "0");
+
+    xml.writeStartElement("Ambient");
+    xml.writeAttribute("r", "1");
+    xml.writeAttribute("g", "1");
+    xml.writeAttribute("b", "1");
+    xml.writeEndElement(); // Ambient
+
+    xml.writeStartElement("ZAxisDirection");
+    xml.writeAttribute("x", "0");
+    xml.writeAttribute("y", "-1");
+    xml.writeEndElement(); // ZAxisDirection
+
+    xml.writeEndElement(); // SceneProperties
+
+    // Escrever entidades na cena
+    xml.writeStartElement("EntitiesInScene");
+
+    int entityId = 1;
+    for (const auto& item : m_scene->items()) {
+        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
+        if (pixmapItem) {
+            auto it = m_entityPlacements.find(pixmapItem);
+            if (it != m_entityPlacements.end()) {
+                Entity* entity = it->entity;
+                int tileIndex = it->tileIndex;
+
+                xml.writeStartElement("Entity");
+                xml.writeAttribute("id", QString::number(entityId++));
+                xml.writeAttribute("spriteFrame", QString::number(tileIndex));
+
+                xml.writeTextElement("EntityName", entity->getName() + ".ent");
+
+                xml.writeStartElement("Position");
+                xml.writeAttribute("x", QString::number(static_cast<int>(pixmapItem->pos().x())));
+                xml.writeAttribute("y", QString::number(static_cast<int>(pixmapItem->pos().y())));
+                xml.writeAttribute("z", "0");
+                xml.writeAttribute("angle", "0");
+                xml.writeEndElement(); // Position
+
+                xml.writeStartElement("Entity");
+                xml.writeTextElement("FileName", entity->getName() + ".ent");
+                xml.writeEndElement(); // Entity
+
+                xml.writeEndElement(); // Entity
+            }
+        }
+    }
+
+    xml.writeEndElement(); // EntitiesInScene
+
+    xml.writeEndElement(); // Ethanon
+
+    xml.writeEndDocument();
+
+    file.close();
+
+    QMessageBox::information(this, tr("Sucesso"), tr("Cena exportada com sucesso."));
 }
 
 void MainWindow::handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos)
@@ -486,4 +576,22 @@ void MainWindow::handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos
     }
 
     qCWarning(mainWindowCategory) << "Nenhum tile selecionado";
+}
+
+Entity* MainWindow::getEntityForPixmapItem(QGraphicsPixmapItem* item)
+{
+    auto it = m_entityPlacements.find(item);
+    if (it != m_entityPlacements.end()) {
+        return it->entity;
+    }
+    return nullptr;
+}
+
+int MainWindow::getTileIndexForPixmapItem(QGraphicsPixmapItem* item)
+{
+    auto it = m_entityPlacements.find(item);
+    if (it != m_entityPlacements.end()) {
+        return it->tileIndex;
+    }
+    return -1;
 }

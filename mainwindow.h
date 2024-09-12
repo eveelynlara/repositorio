@@ -10,6 +10,7 @@
 #include <QListWidget>
 #include <QVector>
 #include <QLabel>
+#include <QMap>
 #include <exception>
 
 class Entity;
@@ -28,6 +29,7 @@ private slots:
     void onEntityItemClicked(QListWidgetItem *item);
     void onTileItemClicked(QListWidgetItem *item);
     void onSceneViewMousePress(QMouseEvent *event);
+    void exportScene();
 
 private:
     void highlightSelectedTile();
@@ -46,6 +48,8 @@ private:
     bool eventFilter(QObject *watched, QEvent *event) override;
     void handleException(const QString &context, const std::exception &e);
     void handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos);
+    Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
+    int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
 
     QTreeView *m_projectExplorer;
     QFileSystemModel *m_fileSystemModel;
@@ -55,13 +59,17 @@ private:
     QListWidget *m_entityList;
     QListWidget *m_tileList;
     QString m_projectPath;
-
     EntityManager *m_entityManager;
     Entity *m_selectedEntity;
     int m_selectedTileIndex;
     QGraphicsPixmapItem *m_entityPreview;
-
     QLabel *m_spritesheetLabel;
+
+    struct EntityPlacement {
+        Entity* entity;
+        int tileIndex;
+    };
+    QMap<QGraphicsPixmapItem*, EntityPlacement> m_entityPlacements;
 };
 
 #endif // MAINWINDOW_H
