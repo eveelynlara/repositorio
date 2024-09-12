@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<TextureAtlas imagePath="utree-blocks-basic.png" width="1024" height="512">
+    <sprite n="basic-01.png" x="2" y="2" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-02.png" x="134" y="2" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-03.png" x="266" y="2" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-04.png" x="398" y="2" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-05.png" x="530" y="2" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-06.png" x="662" y="2" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-07.png" x="794" y="2" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-08.png" x="2" y="134" w="128" h="127" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-09.png" x="134" y="134" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-10.png" x="266" y="134" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-11.png" x="398" y="134" w="128" h="127" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-12.png" x="530" y="134" w="128" h="127" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-13.png" x="662" y="134" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-14.png" x="794" y="134" w="128" h="128" oX="0" oY="0" oW="128" oH="128"/>
+    <sprite n="basic-15.png" x="2" y="266" w="128" h="127" oX="0" oY="0" oW="128" oH="128"/>
+</TextureAtlas>
