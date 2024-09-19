@@ -157,4 +157,71 @@ int MainWindow::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     }
     return _id;
 }
+namespace {
+
+#ifdef QT_MOC_HAS_STRINGDATA
+struct qt_meta_stringdata_CLASSCustomGraphicsViewENDCLASS_t {};
+constexpr auto qt_meta_stringdata_CLASSCustomGraphicsViewENDCLASS = QtMocHelpers::stringData(
+    "CustomGraphicsView"
+);
+#else  // !QT_MOC_HAS_STRINGDATA
+#error "qtmochelpers.h not found or too old."
+#endif // !QT_MOC_HAS_STRINGDATA
+} // unnamed namespace
+
+Q_CONSTINIT static const uint qt_meta_data_CLASSCustomGraphicsViewENDCLASS[] = {
+
+ // content:
+      12,       // revision
+       0,       // classname
+       0,    0, // classinfo
+       0,    0, // methods
+       0,    0, // properties
+       0,    0, // enums/sets
+       0,    0, // constructors
+       0,       // flags
+       0,       // signalCount
+
+       0        // eod
+};
+
+Q_CONSTINIT const QMetaObject CustomGraphicsView::staticMetaObject = { {
+    QMetaObject::SuperData::link<QGraphicsView::staticMetaObject>(),
+    qt_meta_stringdata_CLASSCustomGraphicsViewENDCLASS.offsetsAndSizes,
+    qt_meta_data_CLASSCustomGraphicsViewENDCLASS,
+    qt_static_metacall,
+    nullptr,
+    qt_incomplete_metaTypeArray<qt_meta_stringdata_CLASSCustomGraphicsViewENDCLASS_t,
+        // Q_OBJECT / Q_GADGET
+        QtPrivate::TypeAndForceComplete<CustomGraphicsView, std::true_type>
+    >,
+    nullptr
+} };
+
+void CustomGraphicsView::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, void **_a)
+{
+    (void)_o;
+    (void)_id;
+    (void)_c;
+    (void)_a;
+}
+
+const QMetaObject *CustomGraphicsView::metaObject() const
+{
+    return QObject::d_ptr->metaObject ? QObject::d_ptr->dynamicMetaObject() : &staticMetaObject;
+}
+
+void *CustomGraphicsView::qt_metacast(const char *_clname)
+{
+    if (!_clname) return nullptr;
+    if (!strcmp(_clname, qt_meta_stringdata_CLASSCustomGraphicsViewENDCLASS.stringdata0))
+        return static_cast<void*>(this);
+    return QGraphicsView::qt_metacast(_clname);
+}
+
+int CustomGraphicsView::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
+{
+    _id = QGraphicsView::qt_metacall(_c, _id, _a);
+    return _id;
+}
 QT_WARNING_POP

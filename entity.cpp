@@ -7,7 +7,11 @@
 #include <QPainter>
 
 Entity::Entity(const QString &name, const QString &filePath)
-    : m_name(name), m_selectedTileIndex(0), m_isInvisible(false), m_hasSprite(false)
+    : m_type(EntityType::Horizontal),
+      m_name(name),
+      m_selectedTileIndex(0),
+      m_isInvisible(false),
+      m_hasSprite(true)
 {
     qDebug() << "Iniciando carregamento da entidade:" << name;
 
@@ -104,7 +108,19 @@ void Entity::loadEntityDefinition(const QString &filePath)
     while (!xml.atEnd() && !xml.hasError()) {
         QXmlStreamReader::TokenType token = xml.readNext();
         if (token == QXmlStreamReader::StartElement) {
-            if (xml.name().compare(QLatin1String("Sprite"), Qt::CaseInsensitive) == 0) {
+            if (xml.name().compare(QLatin1String("Entity"), Qt::CaseInsensitive) == 0) {
+                QString type = xml.attributes().value("type").toString().toLower();
+                if (type == "vertical") {
+                    m_type = EntityType::Vertical;
+                } else if (type == "layerable") {
+                    m_type = EntityType::Layerable;
+                } else if (type == "invisible") {
+                    m_type = EntityType::Invisible;
+                    m_isInvisible = true;
+                } else {
+                    m_type = EntityType::Horizontal;
+                }
+            } else if (xml.name().compare(QLatin1String("Sprite"), Qt::CaseInsensitive) == 0) {
                 spriteName = xml.readElementText();
                 qDebug() << "Nome do sprite encontrado:" << spriteName;
                 loadImage(spriteName, filePath);
@@ -183,6 +199,10 @@ void Entity::loadEntityDefinition(const QString &filePath)
     for (int i = 0; i < m_spriteDefinitions.size(); ++i) {
         qDebug() << i << ":" << m_spriteDefinitions[i];
     }
+}
+
+bool Entity::hasOnlyCollision() const {
+    return !hasSprite() && !isInvisible();
 }
 
 void Entity::loadCollisionInfo(QXmlStreamReader &xml)
