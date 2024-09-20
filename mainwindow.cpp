@@ -123,13 +123,14 @@ void MainWindow::updateGrid()
     m_gridLines.clear();
 
     // Mostrar a grade apenas quando o Shift estiver pressionado
-    if (m_shiftPressed) {
-        // Obter o tamanho da entidade selecionada ou usar um tamanho padrão
-        QSizeF entitySize = m_selectedEntity ? m_selectedEntity->getCurrentSize() : QSizeF(32, 32);
-        
-        // Se a entidade não tem um tamanho válido, use um tamanho padrão
+    if (m_shiftPressed && m_selectedEntity) {
+        // Obter o tamanho da entidade selecionada
+        QSizeF entitySize = m_selectedEntity->getCurrentSize();
         if (entitySize.isEmpty()) {
-            entitySize = QSizeF(32, 32);
+            entitySize = m_selectedEntity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
+            }
         }
 
         // Obter o tamanho visível da view
@@ -150,6 +151,8 @@ void MainWindow::updateGrid()
             QGraphicsLineItem* line = m_scene->addLine(visibleRect.left(), y, visibleRect.right(), y, QPen(Qt::lightGray, 1, Qt::DotLine));
             m_gridLines.append(line);
         }
+
+        qCInfo(mainWindowCategory) << "Grade atualizada com tamanho de célula:" << entitySize;
     }
 }
 
@@ -387,28 +390,42 @@ void MainWindow::updateEntityPreview()
             m_entityPreview = nullptr;
         }
 
-        QPixmap previewPixmap;
+        QSizeF size = m_selectedEntity->getCurrentSize();
+        if (size.isEmpty()) {
+            size = m_selectedEntity->getCollisionSize();
+            if (size.isEmpty()) {
+                size = QSizeF(32, 32);
+            }
+        }
+
+        QPixmap previewPixmap(size.toSize());
+        previewPixmap.fill(Qt::transparent);
+        QPainter painter(&previewPixmap);
 
         if (m_selectedEntity->isInvisible()) {
-            // Desenhe um retângulo transparente com borda vermelha para entidades invisíveis
-            QSizeF size = m_selectedEntity->getCollisionSize();
-            previewPixmap = QPixmap(size.toSize());
-            previewPixmap.fill(Qt::transparent);
-            QPainter painter(&previewPixmap);
             painter.setPen(QPen(Qt::red, 2));
             painter.drawRect(previewPixmap.rect().adjusted(1, 1, -1, -1));
-            painter.drawText(previewPixmap.rect(), Qt::AlignCenter, "Invisible");
+            painter.setFont(QFont("Arial", 8));
+            QString text = m_selectedEntity->getName();
+            QRectF textRect = painter.boundingRect(previewPixmap.rect(), Qt::AlignCenter, text);
+            if (textRect.width() > previewPixmap.width() - 4) {
+                text = painter.fontMetrics().elidedText(text, Qt::ElideRight, previewPixmap.width() - 4);
+            }
+            painter.drawText(previewPixmap.rect(), Qt::AlignCenter, text);
+
+            QPixmap invisibleIcon(m_projectPath + "/entities/invisible.png");
+            if (!invisibleIcon.isNull()) {
+                QSize iconSize(16, 16);
+                QPoint iconPos(previewPixmap.width() - iconSize.width() - 2, 2);
+                painter.drawPixmap(QRect(iconPos, iconSize), invisibleIcon);
+            }
+            qCInfo(mainWindowCategory) << "Preview atualizado para entidade invisível:" << m_selectedEntity->getName();
         } else if (m_selectedEntity->hasOnlyCollision()) {
-            // Desenhe um retângulo azul para representar entidades apenas com colisão
-            QSizeF size = m_selectedEntity->getCollisionSize();
-            previewPixmap = QPixmap(size.toSize());
-            previewPixmap.fill(Qt::transparent);
-            QPainter painter(&previewPixmap);
             painter.setPen(QPen(Qt::blue, 2));
             painter.drawRect(previewPixmap.rect().adjusted(1, 1, -1, -1));
             painter.drawText(previewPixmap.rect(), Qt::AlignCenter, "Collision");
+            qCInfo(mainWindowCategory) << "Preview atualizado para entidade apenas com colisão:" << m_selectedEntity->getName();
         } else {
-            // Código existente para entidades normais com sprite
             QPixmap fullPixmap = m_selectedEntity->getPixmap();
             const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
 
@@ -418,13 +435,17 @@ void MainWindow::updateEntityPreview()
             }
 
             QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
-            previewPixmap = fullPixmap.copy(spriteRect.toRect());
+            painter.drawPixmap(previewPixmap.rect(), fullPixmap, spriteRect);
+            qCInfo(mainWindowCategory) << "Preview atualizado para entidade normal:" << m_selectedEntity->getName();
         }
 
         m_entityPreview = m_scene->addPixmap(previewPixmap);
         m_entityPreview->setOpacity(0.5);
         m_entityPreview->setFlag(QGraphicsItem::ItemIsMovable);
-        qCInfo(mainWindowCategory) << "Preview da entidade atualizado para" << (m_selectedEntity->isInvisible() ? "invisível" : (m_selectedEntity->hasOnlyCollision() ? "apenas colisão" : "sprite normal"));
+        
+        qCInfo(mainWindowCategory) << "Preview da entidade atualizado para" 
+                                   << (m_selectedEntity->isInvisible() ? "invisível" : 
+                                      (m_selectedEntity->hasOnlyCollision() ? "apenas colisão" : "sprite normal"));
 
     } catch (const std::exception& e) {
         handleException("Erro ao atualizar preview da entidade", e);
@@ -460,17 +481,28 @@ void MainWindow::updateTileList()
     }
 
     try {
-        QPixmap entityPixmap = m_selectedEntity->getPixmap();
+        QPixmap entityPixmap;
 
         if (m_selectedEntity->isInvisible()) {
-            // Para entidades invisíveis, crie um pixmap com borda vermelha
             QSizeF collisionSize = m_selectedEntity->getCollisionSize();
+            if (collisionSize.isEmpty()) {
+                collisionSize = QSizeF(32, 32);
+            }
             entityPixmap = QPixmap(collisionSize.toSize());
             entityPixmap.fill(Qt::transparent);
             QPainter painter(&entityPixmap);
             painter.setPen(QPen(Qt::red, 2));
             painter.drawRect(entityPixmap.rect().adjusted(1, 1, -1, -1));
-            painter.drawText(entityPixmap.rect(), Qt::AlignCenter, m_selectedEntity->getName());
+            painter.setFont(QFont("Arial", 8));
+            painter.drawText(entityPixmap.rect(), Qt::AlignCenter, "Invisible\n" + m_selectedEntity->getName());
+
+            // Carregar e desenhar o ícone de entidade invisível
+            QPixmap invisibleIcon(m_projectPath + "/entities/invisible.png");
+            if (!invisibleIcon.isNull()) {
+                painter.drawPixmap(entityPixmap.rect().center() - QPoint(invisibleIcon.width()/2, invisibleIcon.height()/2), invisibleIcon);
+            }
+        } else {
+            entityPixmap = m_selectedEntity->getPixmap();
         }
 
         // Mostrar o spritesheet completo no QLabel
@@ -482,15 +514,21 @@ void MainWindow::updateTileList()
 
         // Adicionar informações sobre os tiles à lista
         const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
-        for (int i = 0; i < spriteDefinitions.size(); ++i) {
-            QListWidgetItem* item = new QListWidgetItem(QString("Tile %1").arg(i));
-            item->setData(Qt::UserRole, i);
+        if (m_selectedEntity->isInvisible() || spriteDefinitions.isEmpty()) {
+            QListWidgetItem* item = new QListWidgetItem("Invisible Entity");
+            item->setData(Qt::UserRole, 0);
             m_tileList->addItem(item);
-            qCInfo(mainWindowCategory) << "Adicionado tile" << i << ":" << spriteDefinitions[i];
+        } else {
+            for (int i = 0; i < spriteDefinitions.size(); ++i) {
+                QListWidgetItem* item = new QListWidgetItem(QString("Tile %1").arg(i));
+                item->setData(Qt::UserRole, i);
+                m_tileList->addItem(item);
+                qCInfo(mainWindowCategory) << "Adicionado tile" << i << ":" << spriteDefinitions[i];
+            }
         }
 
         qCInfo(mainWindowCategory) << "Spritesheet atualizado e lista de tiles preenchida";
-        qCInfo(mainWindowCategory) << "Número de tiles:" << spriteDefinitions.size();
+        qCInfo(mainWindowCategory) << "Número de tiles:" << (m_selectedEntity->isInvisible() ? 1 : spriteDefinitions.size());
         qCInfo(mainWindowCategory) << "Tamanho do pixmap:" << entityPixmap.size();
         qCInfo(mainWindowCategory) << "Entidade é invisível:" << m_selectedEntity->isInvisible();
     } catch (const std::exception& e) {
@@ -562,49 +600,70 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
     }
 
     try {
-        QPixmap fullPixmap = m_selectedEntity->getPixmap();
-        const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
-        QSizeF collisionSize = m_selectedEntity->getCollisionSize();
+        qCInfo(mainWindowCategory) << "Iniciando colocação de entidade:" << m_selectedEntity->getName();
+        qCInfo(mainWindowCategory) << "Posição inicial:" << pos;
+        qCInfo(mainWindowCategory) << "Entidade é invisível:" << m_selectedEntity->isInvisible();
 
-        if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
-            qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
-            return;
-        }
-
-        QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
-        QPixmap tilePixmap;
-
-        if (m_selectedEntity->isInvisible()) {
-        tilePixmap = QPixmap(collisionSize.toSize());
-        tilePixmap.fill(Qt::transparent);
-        QPainter painter(&tilePixmap);
-        painter.setPen(QPen(Qt::red, 2));
-        painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
-        painter.drawText(tilePixmap.rect(), Qt::AlignCenter, m_selectedEntity->getName());
-    } else if (m_selectedEntity->hasOnlyCollision()) {
-        tilePixmap = QPixmap(collisionSize.toSize());
-        tilePixmap.fill(Qt::transparent);
-        QPainter painter(&tilePixmap);
-        painter.setPen(QPen(Qt::blue, 2));
-        painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
-        painter.drawText(tilePixmap.rect(), Qt::AlignCenter, "Collision");
-    } else {
-            if (collisionSize.isValid()) {
-                QRect sourceRect(spriteRect.topLeft().toPoint(), collisionSize.toSize());
-                tilePixmap = fullPixmap.copy(sourceRect);
-            } else {
-                tilePixmap = fullPixmap.copy(spriteRect.toRect());
+        QSizeF entitySize = m_selectedEntity->getCurrentSize();
+        if (entitySize.isEmpty()) {
+            entitySize = m_selectedEntity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
             }
         }
+        qCInfo(mainWindowCategory) << "Tamanho da entidade:" << entitySize;
 
         QPointF finalPos = pos;
         
-        // Ajustar a posição para a grade apenas se o Shift estiver pressionado
-        if (QApplication::keyboardModifiers() & Qt::ShiftModifier) {
-            QSizeF tileSize = m_selectedEntity->getCurrentSize();
-            qreal gridX = qRound(pos.x() / tileSize.width()) * tileSize.width();
-            qreal gridY = qRound(pos.y() / tileSize.height()) * tileSize.height();
+        if (m_shiftPressed) {
+            qreal gridX = qRound(pos.x() / entitySize.width()) * entitySize.width();
+            qreal gridY = qRound(pos.y() / entitySize.height()) * entitySize.height();
             finalPos = QPointF(gridX, gridY);
+            qCInfo(mainWindowCategory) << "Posição ajustada à grade:" << finalPos;
+        }
+
+        QPixmap tilePixmap(entitySize.toSize());
+        tilePixmap.fill(Qt::transparent);
+        QPainter painter(&tilePixmap);
+
+        if (m_selectedEntity->isInvisible()) {
+            qCInfo(mainWindowCategory) << "Desenhando entidade invisível";
+            painter.setPen(QPen(Qt::red, 2));
+            painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
+            painter.setFont(QFont("Arial", 8));
+            QString text = m_selectedEntity->getName();
+            QRectF textRect = painter.boundingRect(tilePixmap.rect(), Qt::AlignCenter, text);
+            if (textRect.width() > tilePixmap.width() - 4) {
+                text = painter.fontMetrics().elidedText(text, Qt::ElideRight, tilePixmap.width() - 4);
+            }
+            painter.drawText(tilePixmap.rect(), Qt::AlignCenter, text);
+
+            QPixmap invisibleIcon(m_projectPath + "/entities/invisible.png");
+            if (!invisibleIcon.isNull()) {
+                QSize iconSize(16, 16);
+                QPoint iconPos(tilePixmap.width() - iconSize.width() - 2, 2);
+                painter.drawPixmap(QRect(iconPos, iconSize), invisibleIcon);
+                qCInfo(mainWindowCategory) << "Ícone de entidade invisível desenhado";
+            } else {
+                qCWarning(mainWindowCategory) << "Ícone de entidade invisível não encontrado";
+            }
+        } else if (m_selectedEntity->hasOnlyCollision()) {
+            qCInfo(mainWindowCategory) << "Desenhando entidade apenas com colisão";
+            painter.setPen(QPen(Qt::blue, 2));
+            painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
+            painter.drawText(tilePixmap.rect(), Qt::AlignCenter, "Collision");
+        } else {
+            qCInfo(mainWindowCategory) << "Desenhando entidade normal";
+            QPixmap fullPixmap = m_selectedEntity->getPixmap();
+            const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+            
+            if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
+                qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
+                return;
+            }
+
+            QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
+            painter.drawPixmap(tilePixmap.rect(), fullPixmap, spriteRect);
         }
 
         QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
@@ -612,13 +671,14 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
         item->setFlag(QGraphicsItem::ItemIsMovable);
         item->setFlag(QGraphicsItem::ItemIsSelectable);
 
-        // Armazenar informações sobre a entidade colocada
         EntityPlacement placement;
         placement.entity = m_selectedEntity;
         placement.tileIndex = m_selectedTileIndex;
         m_entityPlacements[item] = placement;
 
-        qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos;
+        updateGrid();
+
+        qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos << "com tamanho:" << entitySize;
     } catch (const std::exception& e) {
         handleException("Erro ao colocar entidade na cena", e);
     }
@@ -712,9 +772,19 @@ void MainWindow::exportScene()
 
                 xml.writeTextElement("EntityName", entity->getName() + ".ent");
 
+                // Calcular a posição corrigida
+                QSizeF entitySize = entity->getCurrentSize();
+                if (entitySize.isEmpty()) {
+                    entitySize = entity->getCollisionSize();
+                    if (entitySize.isEmpty()) {
+                        entitySize = QSizeF(32, 32);
+                    }
+                }
+                QPointF correctedPos = pixmapItem->pos() + QPointF(entitySize.width() / 2, entitySize.height() / 2);
+
                 xml.writeStartElement("Position");
-                xml.writeAttribute("x", QString::number(static_cast<int>(pixmapItem->pos().x())));
-                xml.writeAttribute("y", QString::number(static_cast<int>(pixmapItem->pos().y())));
+                xml.writeAttribute("x", QString::number(static_cast<int>(correctedPos.x())));
+                xml.writeAttribute("y", QString::number(static_cast<int>(correctedPos.y())));
                 xml.writeAttribute("z", "0");
                 xml.writeAttribute("angle", "0");
                 xml.writeEndElement(); // Position
@@ -724,6 +794,10 @@ void MainWindow::exportScene()
                 xml.writeEndElement(); // Entity
 
                 xml.writeEndElement(); // Entity
+
+                qCInfo(mainWindowCategory) << "Exportando entidade:" << entity->getName()
+                                           << "na posição:" << correctedPos
+                                           << "tamanho:" << entitySize;
             }
         }
     }

@@ -57,6 +57,13 @@ bool Entity::loadImage(const QString &imageName, const QString &entityPath)
     return true;
 }
 
+bool Entity::isInvisible() const
+{
+    // Uma entidade é considerada invisível se não tiver sprite
+    // ou se seu pixmap estiver vazio, mas tiver colisão
+    return m_pixmap.isNull() && !m_collisionSize.isEmpty();
+}
+
 void Entity::loadCustomSpriteDefinitions(const QString &xmlPath) {
     QFile file(xmlPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {

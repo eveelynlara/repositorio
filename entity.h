@@ -28,8 +28,8 @@ public:
     void setSelectedTileIndex(int index) { m_selectedTileIndex = index; }
     bool hasSprite() const { return m_hasSprite; }
     QSizeF getCollisionSize() const { return m_collisionSize; }
-    bool isInvisible() const { return m_isInvisible; }
     bool hasOnlyCollision() const;
+    bool isInvisible() const;
 
     // Adicione estes novos métodos
     EntityType getType() const { return m_type; }
