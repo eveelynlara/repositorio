@@ -33,6 +33,7 @@ protected:
     void changeEvent(QEvent *event) override;
     void leaveEvent(QEvent *event) override;
     void wheelEvent(QWheelEvent* event) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
     void onProjectItemDoubleClicked(const QModelIndex &index);
@@ -59,13 +60,13 @@ private:
     void updateEntityPreview();
     void updateTileList();
     void placeEntityInScene(const QPointF &pos);
-    bool eventFilter(QObject *watched, QEvent *event) override;
     void handleException(const QString &context, const std::exception &e);
     void handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos);
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
     void updateGrid();
     void updatePreviewPosition(const QPointF& scenePos);
+    void updateShiftState(bool pressed);
 
     QPixmap createEntityPixmap(const QSizeF &size);
     QTreeView *m_projectExplorer;
@@ -84,7 +85,7 @@ private:
 
     QList<QGraphicsItem*> m_gridLines;
     int m_gridSize;
-    bool m_shiftPressed = false;
+    bool m_shiftPressed;
 
     struct EntityPlacement {
         Entity* entity;

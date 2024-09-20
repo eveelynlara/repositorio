@@ -22,7 +22,7 @@ Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_projectPath(""), m_selectedEntity(nullptr), 
-      m_selectedTileIndex(-1), m_entityPreview(nullptr), m_previewItem(nullptr)
+      m_selectedTileIndex(-1), m_entityPreview(nullptr), m_previewItem(nullptr), m_shiftPressed(false)
 {
     try {
         m_entityManager = new EntityManager();
@@ -38,6 +38,8 @@ MainWindow::MainWindow(QWidget *parent)
         previewUpdateTimer->setInterval(16); // Aproximadamente 60 FPS
         connect(previewUpdateTimer, &QTimer::timeout, this, &MainWindow::updatePreviewContinuously);
         previewUpdateTimer->start();
+        
+        qApp->installEventFilter(this);
 
         qCInfo(mainWindowCategory) << "MainWindow inicializado com sucesso";
     } catch (const std::exception& e) {
@@ -467,7 +469,6 @@ void MainWindow::updateEntityPreview()
 
 void MainWindow::updatePreviewPosition(const QPointF& scenePos)
 {
-    qCInfo(mainWindowCategory) << "Atualizando posição do preview para:" << scenePos;
     if (m_selectedEntity && m_previewItem) {
         QPointF adjustedPos = scenePos;
         if (m_shiftPressed) {
@@ -484,9 +485,7 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
         }
         m_previewItem->setPos(adjustedPos);
         m_previewItem->show();
-        qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos;
-    } else {
-        qCInfo(mainWindowCategory) << "Nenhuma entidade selecionada ou preview não existe";
+        qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos << "Shift:" << m_shiftPressed;
     }
 }
 
@@ -609,6 +608,16 @@ void MainWindow::clearSelection()
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+    // Captura global de eventos de teclado para o Shift
+    if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_Shift) {
+            updateShiftState(event->type() == QEvent::KeyPress);
+            return true;
+        }
+    }
+
+    // Funcionalidades existentes
     if (watched == m_sceneView->viewport()) {
         if (event->type() == QEvent::MouseMove) {
             QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
@@ -633,6 +642,16 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::updateShiftState(bool pressed)
+{
+    m_shiftPressed = pressed;
+    updateGrid(); // Atualiza a grid com base no novo estado do Shift
+    if (m_previewItem) {
+        updatePreviewPosition(m_previewItem->pos()); // Atualiza a posição do preview
+    }
+    qCInfo(mainWindowCategory) << "Estado do Shift atualizado:" << (pressed ? "pressionado" : "liberado");
 }
 
 void MainWindow::onSceneViewMousePress(QMouseEvent *event)
