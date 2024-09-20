@@ -39,6 +39,7 @@ private slots:
     void onEntityItemClicked(QListWidgetItem *item);
     void onTileItemClicked(QListWidgetItem *item);
     void onSceneViewMousePress(QMouseEvent *event);
+    void updatePreviewContinuously();
     void exportScene();
 
 private:
@@ -64,11 +65,12 @@ private:
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
     void updateGrid();
+    void updatePreviewPosition(const QPointF& scenePos);
 
+    QPixmap createEntityPixmap(const QSizeF &size);
     QTreeView *m_projectExplorer;
     QFileSystemModel *m_fileSystemModel;
     QGraphicsView *m_sceneView;
-    QGraphicsPixmapItem* m_previewItem = nullptr;
     QGraphicsScene *m_scene;
     QDockWidget *m_propertiesDock;
     QListWidget *m_entityList;
@@ -89,6 +91,8 @@ private:
         int tileIndex;
     };
     QMap<QGraphicsPixmapItem*, EntityPlacement> m_entityPlacements;
+    QGraphicsPixmapItem* m_previewItem; // Item para mostrar o preview
+    bool m_isPlacingEntity; // Flag para indicar se estamos no modo de colocação
 };
 
 class CustomGraphicsView : public QGraphicsView
