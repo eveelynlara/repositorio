@@ -412,13 +412,6 @@ void MainWindow::updateEntityPreview()
                 text = painter.fontMetrics().elidedText(text, Qt::ElideRight, previewPixmap.width() - 4);
             }
             painter.drawText(previewPixmap.rect(), Qt::AlignCenter, text);
-
-            QPixmap invisibleIcon(m_projectPath + "/entities/invisible.png");
-            if (!invisibleIcon.isNull()) {
-                QSize iconSize(16, 16);
-                QPoint iconPos(previewPixmap.width() - iconSize.width() - 2, 2);
-                painter.drawPixmap(QRect(iconPos, iconSize), invisibleIcon);
-            }
             qCInfo(mainWindowCategory) << "Preview atualizado para entidade invisível:" << m_selectedEntity->getName();
         } else if (m_selectedEntity->hasOnlyCollision()) {
             painter.setPen(QPen(Qt::blue, 2));
@@ -637,16 +630,6 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
                 text = painter.fontMetrics().elidedText(text, Qt::ElideRight, tilePixmap.width() - 4);
             }
             painter.drawText(tilePixmap.rect(), Qt::AlignCenter, text);
-
-            QPixmap invisibleIcon(m_projectPath + "/entities/invisible.png");
-            if (!invisibleIcon.isNull()) {
-                QSize iconSize(16, 16);
-                QPoint iconPos(tilePixmap.width() - iconSize.width() - 2, 2);
-                painter.drawPixmap(QRect(iconPos, iconSize), invisibleIcon);
-                qCInfo(mainWindowCategory) << "Ícone de entidade invisível desenhado";
-            } else {
-                qCWarning(mainWindowCategory) << "Ícone de entidade invisível não encontrado";
-            }
         } else if (m_selectedEntity->hasOnlyCollision()) {
             qCInfo(mainWindowCategory) << "Desenhando entidade apenas com colisão";
             painter.setPen(QPen(Qt::blue, 2));
