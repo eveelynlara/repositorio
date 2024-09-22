@@ -17,6 +17,8 @@
 #include <QGraphicsView>
 #include <QEvent>
 #include <QTimer>
+#include <QStack>
+#include <QGraphicsSceneMouseEvent>
 
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
@@ -227,6 +229,22 @@ void MainWindow::setupTileList()
 
 void MainWindow::createActions()
 {
+
+    // Ação para desfazer
+    QAction *undoAction = new QAction("Desfazer", this);
+    undoAction->setShortcut(QKeySequence::Undo);
+    connect(undoAction, &QAction::triggered, this, &MainWindow::undo);
+
+    // Ação para refazer
+    QAction *redoAction = new QAction("Refazer", this);
+    redoAction->setShortcut(QKeySequence::Redo);
+    connect(redoAction, &QAction::triggered, this, &MainWindow::redo);
+
+    // Adicione as ações ao menu Editar
+    QMenu *editMenu = menuBar()->addMenu("&Editar");
+    editMenu->addAction(undoAction);
+    editMenu->addAction(redoAction);
+
     // Ação para abrir um projeto
     QAction *openProjectAction = new QAction("Abrir Projeto", this);
     connect(openProjectAction, &QAction::triggered, this, [this]() {
@@ -617,7 +635,28 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         }
     }
 
-    // Funcionalidades existentes
+    if (watched == m_scene) {
+        if (event->type() == QEvent::GraphicsSceneMousePress) {
+            QGraphicsSceneMouseEvent *mouseEvent = static_cast<QGraphicsSceneMouseEvent*>(event);
+            QGraphicsItem *item = m_scene->itemAt(mouseEvent->scenePos(), QTransform());
+            if (item && item->flags() & QGraphicsItem::ItemIsMovable) {
+                m_movingItem = dynamic_cast<QGraphicsPixmapItem*>(item);
+                m_oldPosition = m_movingItem->pos();
+            }
+        } else if (event->type() == QEvent::GraphicsSceneMouseRelease) {
+            if (m_movingItem) {
+                Action action;
+                action.type = Action::MOVE;
+                action.item = m_movingItem;
+                action.oldPos = m_oldPosition;
+                action.newPos = m_movingItem->pos();
+                addAction(action);
+
+                m_movingItem = nullptr;
+            }
+        }
+    }
+    
     if (watched == m_sceneView->viewport()) {
         if (event->type() == QEvent::MouseMove) {
             QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
@@ -736,6 +775,15 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
         placement.tileIndex = m_selectedTileIndex;
         m_entityPlacements[item] = placement;
 
+        // Adicionar ação para Undo/Redo
+        Action action;
+        action.type = Action::ADD;
+        action.item = item;
+        action.entity = m_selectedEntity;
+        action.tileIndex = m_selectedTileIndex;
+        action.newPos = finalPos;
+        addAction(action);
+
         updateGrid();
 
         qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos << "com tamanho:" << entitySize;
@@ -778,6 +826,27 @@ QPixmap MainWindow::createEntityPixmap(const QSizeF &size)
     return pixmap;
 }
 
+void MainWindow::removeSelectedEntities()
+{
+    QList<QGraphicsItem*> selectedItems = m_scene->selectedItems();
+    for (QGraphicsItem* item : selectedItems) {
+        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
+        if (pixmapItem) {
+            Action action;
+            action.type = Action::REMOVE;
+            action.item = pixmapItem;
+            action.entity = getEntityForPixmapItem(pixmapItem);
+            action.tileIndex = getTileIndexForPixmapItem(pixmapItem);
+            action.oldPos = pixmapItem->pos();
+            addAction(action);
+
+            m_scene->removeItem(pixmapItem);
+            m_entityPlacements.remove(pixmapItem);
+        }
+    }
+    updateGrid();
+}
+
 void MainWindow::leaveEvent(QEvent *event)
 {
     QMainWindow::leaveEvent(event);
@@ -810,6 +879,62 @@ void MainWindow::handleException(const QString &context, const std::exception &e
     QString errorMessage = QString("%1: %2").arg(context).arg(e.what());
     qCCritical(mainWindowCategory) << errorMessage;
     QMessageBox::critical(this, "Erro", errorMessage);
+}
+
+void MainWindow::undo()
+{
+    if (undoStack.isEmpty()) {
+        return;
+    }
+
+    Action action = undoStack.pop();
+    switch (action.type) {
+        case Action::ADD:
+            m_scene->removeItem(action.item);
+            m_entityPlacements.remove(action.item);
+            break;
+        case Action::REMOVE:
+            m_scene->addItem(action.item);
+            m_entityPlacements[action.item] = {action.entity, action.tileIndex};
+            break;
+        case Action::MOVE:
+            action.item->setPos(action.oldPos);
+            break;
+    }
+
+    redoStack.push(action);
+    updateGrid();
+}
+
+void MainWindow::redo()
+{
+    if (redoStack.isEmpty()) {
+        return;
+    }
+
+    Action action = redoStack.pop();
+    switch (action.type) {
+        case Action::ADD:
+            m_scene->addItem(action.item);
+            m_entityPlacements[action.item] = {action.entity, action.tileIndex};
+            break;
+        case Action::REMOVE:
+            m_scene->removeItem(action.item);
+            m_entityPlacements.remove(action.item);
+            break;
+        case Action::MOVE:
+            action.item->setPos(action.newPos);
+            break;
+    }
+
+    undoStack.push(action);
+    updateGrid();
+}
+
+void MainWindow::addAction(const Action& action)
+{
+    undoStack.push(action);
+    redoStack.clear();
 }
 
 void MainWindow::exportScene()

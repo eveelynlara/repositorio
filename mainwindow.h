@@ -2,20 +2,20 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
-#include <QTreeView>
-#include <QGraphicsView>
-#include <QDockWidget>
-#include <QFileSystemModel>
 #include <QGraphicsScene>
+#include <QGraphicsView>
+#include <QTreeView>
+#include <QFileSystemModel>
 #include <QListWidget>
-#include <QVector>
+#include <QDockWidget>
 #include <QLabel>
-#include <QMap>
-#include <QApplication>
-#include <exception>
+#include <QStack>
+#include "entitymanager.h"
+#include "entity.h"
 
-class Entity;
-class EntityManager;
+QT_BEGIN_NAMESPACE
+namespace Ui { class MainWindow; }
+QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
 {
@@ -27,73 +27,94 @@ public:
     void updateEntityPositions();
     void requestClearPreview() { clearPreview(); }
 
+private:
+    Ui::MainWindow *ui;
+    QGraphicsScene *m_scene;
+    QGraphicsView *m_sceneView;
+    EntityManager *m_entityManager;
+    QTreeView *m_projectExplorer;
+    QFileSystemModel *m_fileSystemModel;
+    QListWidget *m_entityList;
+    QListWidget *m_tileList;
+    QDockWidget *m_propertiesDock;
+    QLabel *m_spritesheetLabel;
+    QString m_projectPath;
+    Entity *m_selectedEntity;
+    int m_selectedTileIndex;
+    QGraphicsPixmapItem *m_previewItem;
+    bool m_shiftPressed;
+    int m_gridSize;
+
+    struct EntityPlacement {
+        Entity *entity;
+        int tileIndex;
+    };
+
+    QMap<QGraphicsPixmapItem*, EntityPlacement> m_entityPlacements;
+
+    // Estrutura para armazenar ações
+    struct Action {
+        enum Type { ADD, REMOVE, MOVE };
+        Type type;
+        QGraphicsPixmapItem* item;
+        QPointF oldPos;
+        QPointF newPos;
+        Entity* entity;
+        int tileIndex;
+    };
+
+    QStack<Action> undoStack;
+    QStack<Action> redoStack;
+    QGraphicsPixmapItem* m_movingItem;
+    QGraphicsPixmapItem *m_entityPreview;
+    QPointF m_oldPosition;
+    QVector<QGraphicsLineItem*> m_gridLines;
+
+    void setupUI();
+    void setupProjectExplorer();
+    void setupSceneView();
+    void setupEntityList();
+    void setupTileList();
+    void createActions();
+    void createMenus();
+    void loadEntities();
+    void updateGrid();
+    void updateEntityPreview();
+    void updatePreviewPosition(const QPointF& scenePos);
+    void clearPreview();
+    void clearSelection();
+    void placeEntityInScene(const QPointF &pos);
+    void updateTileList();
+    void drawGridOnSpritesheet();
+    void highlightSelectedTile();
+    void handleException(const QString &context, const std::exception &e);
+    void handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos);
+    Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
+    int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
+
+    void undo();
+    void redo();
+    void addAction(const Action& action);
+    QPixmap createEntityPixmap(const QSizeF &size);
+
 protected:
+    void wheelEvent(QWheelEvent *event) override;
     void keyPressEvent(QKeyEvent *event) override;
     void keyReleaseEvent(QKeyEvent *event) override;
     void changeEvent(QEvent *event) override;
     void leaveEvent(QEvent *event) override;
-    void wheelEvent(QWheelEvent* event) override;
-    bool eventFilter(QObject *obj, QEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
     void onProjectItemDoubleClicked(const QModelIndex &index);
     void onEntityItemClicked(QListWidgetItem *item);
     void onTileItemClicked(QListWidgetItem *item);
-    void onSceneViewMousePress(QMouseEvent *event);
     void updatePreviewContinuously();
     void exportScene();
-
-private:
-    void clearSelection();
-    void clearPreview();
+    void onSceneViewMousePress(QMouseEvent *event);
     void onSceneViewMouseMove(QMouseEvent *event);
-    void highlightSelectedTile();
-    void drawGridOnSpritesheet();
-    void setupUI();
-    void createActions();
-    void createMenus();
-    void setupProjectExplorer();
-    void setupEntityList();
-    void setupTileList();
-    void setupSceneView();
-    void loadEntities();
-    void updateEntityPreview();
-    void updateTileList();
-    void placeEntityInScene(const QPointF &pos);
-    void handleException(const QString &context, const std::exception &e);
-    void handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos);
-    Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
-    int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
-    void updateGrid();
-    void updatePreviewPosition(const QPointF& scenePos);
     void updateShiftState(bool pressed);
-
-    QPixmap createEntityPixmap(const QSizeF &size);
-    QTreeView *m_projectExplorer;
-    QFileSystemModel *m_fileSystemModel;
-    QGraphicsView *m_sceneView;
-    QGraphicsScene *m_scene;
-    QDockWidget *m_propertiesDock;
-    QListWidget *m_entityList;
-    QListWidget *m_tileList;
-    QString m_projectPath;
-    EntityManager *m_entityManager;
-    Entity* m_selectedEntity;
-    int m_selectedTileIndex;
-    QGraphicsPixmapItem *m_entityPreview;
-    QLabel *m_spritesheetLabel;
-
-    QList<QGraphicsItem*> m_gridLines;
-    int m_gridSize;
-    bool m_shiftPressed;
-
-    struct EntityPlacement {
-        Entity* entity;
-        int tileIndex;
-    };
-    QMap<QGraphicsPixmapItem*, EntityPlacement> m_entityPlacements;
-    QGraphicsPixmapItem* m_previewItem; // Item para mostrar o preview
-    bool m_isPlacingEntity; // Flag para indicar se estamos no modo de colocação
+    void removeSelectedEntities();
 };
 
 class CustomGraphicsView : public QGraphicsView

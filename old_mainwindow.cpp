@@ -13,20 +13,35 @@
 #include <QLoggingCategory>
 #include <QLabel>
 #include <QDir>
+#include <QXmlStreamWriter>
+#include <QGraphicsView>
+#include <QEvent>
+#include <QTimer>
 
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), m_projectPath(""), m_selectedEntity(nullptr), m_selectedTileIndex(-1), m_entityPreview(nullptr)
+    : QMainWindow(parent), m_projectPath(""), m_selectedEntity(nullptr), 
+      m_selectedTileIndex(-1), m_entityPreview(nullptr), m_previewItem(nullptr), m_shiftPressed(false)
 {
     try {
         m_entityManager = new EntityManager();
         setupUI();
+        setupSceneView();
         createActions();
         createMenus();
-
         setWindowTitle("Editor de Cena");
         resize(1024, 768);
+        
+        // Criar e configurar o timer para atualização do preview
+        QTimer *previewUpdateTimer = new QTimer(this);
+        previewUpdateTimer->setInterval(16); // Aproximadamente 60 FPS
+        connect(previewUpdateTimer, &QTimer::timeout, this, &MainWindow::updatePreviewContinuously);
+        previewUpdateTimer->start();
+        
+        qApp->installEventFilter(this);
+
+        qCInfo(mainWindowCategory) << "MainWindow inicializado com sucesso";
     } catch (const std::exception& e) {
         handleException("Erro durante a inicialização", e);
     }
@@ -46,11 +61,14 @@ void MainWindow::setupUI()
     projectDock->setAllowedAreas(Qt::AllDockWidgetAreas);
     addDockWidget(Qt::LeftDockWidgetArea, projectDock);
 
+    QAction* exportAction = new QAction("Exportar Cena", this);
+    connect(exportAction, &QAction::triggered, this, &MainWindow::exportScene);
+
+    QMenu* fileMenu = menuBar()->addMenu("Arquivo");
+    fileMenu->addAction(exportAction);
+
     // Configurar o explorador de projetos
     setupProjectExplorer();
-
-    // Criar a visualização da cena
-    setupSceneView();
 
     // Criar a lista de entidades
     setupEntityList();
@@ -92,11 +110,77 @@ void MainWindow::setupSceneView()
     m_scene = new QGraphicsScene(this);
     m_sceneView = new QGraphicsView(m_scene);
     m_sceneView->setRenderHint(QPainter::Antialiasing);
-    m_sceneView->setDragMode(QGraphicsView::RubberBandDrag);
-    setCentralWidget(m_sceneView);
+    m_sceneView->setDragMode(QGraphicsView::ScrollHandDrag);
 
-    // Conectar o evento de clique do mouse na cena
+    // Configurar o tamanho da grade (pode ser ajustado posteriormente)
+    m_gridSize = 32; // Tamanho da célula da grade em pixels
+
+    // Instalar um event filter no viewport para detectar mudanças de geometria
     m_sceneView->viewport()->installEventFilter(this);
+
+    // Desenhar a grade inicial
+    updateGrid();
+
+    setCentralWidget(m_sceneView);
+}
+
+void MainWindow::updateGrid()
+{
+    // Limpar linhas de grade existentes
+    for (QGraphicsItem* item : m_gridLines) {
+        m_scene->removeItem(item);
+        delete item;
+    }
+    m_gridLines.clear();
+
+    // Mostrar a grade apenas quando o Shift estiver pressionado
+    if (m_shiftPressed && m_selectedEntity) {
+        // Obter o tamanho da entidade selecionada
+        QSizeF entitySize = m_selectedEntity->getCurrentSize();
+        if (entitySize.isEmpty()) {
+            entitySize = m_selectedEntity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
+            }
+        }
+
+        // Obter o tamanho visível da view
+        QRectF visibleRect = m_sceneView->mapToScene(m_sceneView->viewport()->rect()).boundingRect();
+
+        // Ajustar a posição inicial da grade com base na posição da câmera
+        qreal startX = std::floor(visibleRect.left() / entitySize.width()) * entitySize.width();
+        qreal startY = std::floor(visibleRect.top() / entitySize.height()) * entitySize.height();
+
+        // Desenhar linhas verticais
+        for (qreal x = startX; x < visibleRect.right(); x += entitySize.width()) {
+            QGraphicsLineItem* line = m_scene->addLine(x, visibleRect.top(), x, visibleRect.bottom(), QPen(Qt::lightGray, 1, Qt::DotLine));
+            m_gridLines.append(line);
+        }
+
+        // Desenhar linhas horizontais
+        for (qreal y = startY; y < visibleRect.bottom(); y += entitySize.height()) {
+            QGraphicsLineItem* line = m_scene->addLine(visibleRect.left(), y, visibleRect.right(), y, QPen(Qt::lightGray, 1, Qt::DotLine));
+            m_gridLines.append(line);
+        }
+
+        qCInfo(mainWindowCategory) << "Grade atualizada com tamanho de célula:" << entitySize;
+    }
+}
+
+void MainWindow::wheelEvent(QWheelEvent* event)
+{
+    if (event->modifiers() & Qt::ControlModifier) {
+        // Zoom
+        double scaleFactor = 1.15;
+        if (event->angleDelta().y() < 0) {
+            scaleFactor = 1.0 / scaleFactor;
+        }
+        m_sceneView->scale(scaleFactor, scaleFactor);
+        updateGrid(); // Atualizar a grade após o zoom
+    } else {
+        // Scroll padrão
+        QMainWindow::wheelEvent(event);
+    }
 }
 
 void MainWindow::setupEntityList()
@@ -211,12 +295,22 @@ void MainWindow::onProjectItemDoubleClicked(const QModelIndex &index)
     }
 }
 
+void CustomGraphicsView::leaveEvent(QEvent *event)
+{
+    QGraphicsView::leaveEvent(event);
+    static_cast<MainWindow*>(window())->requestClearPreview();
+}
+
 void MainWindow::onEntityItemClicked(QListWidgetItem *item)
 {
+    clearPreview(); // Limpa a pré-visualização anterior
+
     if (!item) {
         qCWarning(mainWindowCategory) << "Item clicado é nulo";
         return;
     }
+
+    updateGrid();
 
     QString entityName = item->text();
     try {
@@ -229,9 +323,45 @@ void MainWindow::onEntityItemClicked(QListWidgetItem *item)
         updateEntityPreview();
         updateTileList();
         qCInfo(mainWindowCategory) << "Entidade selecionada:" << entityName;
+        
+        // Força a atualização do preview na posição atual do mouse
+        QPoint globalPos = QCursor::pos();
+        QPoint viewportPos = m_sceneView->viewport()->mapFromGlobal(globalPos);
+        QPointF scenePos = m_sceneView->mapToScene(viewportPos);
+        qCInfo(mainWindowCategory) << "Posição inicial do preview:" << scenePos;
+        updatePreviewPosition(scenePos);
     } catch (const std::exception& e) {
         handleException("Erro ao selecionar entidade", e);
     }
+}
+
+void MainWindow::updatePreviewContinuously()
+{
+    if (m_selectedEntity && m_previewItem) {
+        QPoint globalPos = QCursor::pos();
+        QPoint viewportPos = m_sceneView->viewport()->mapFromGlobal(globalPos);
+        QPointF scenePos = m_sceneView->mapToScene(viewportPos);
+        updatePreviewPosition(scenePos);
+        qCInfo(mainWindowCategory) << "Preview atualizado continuamente para posição:" << scenePos;
+    }
+}
+
+void MainWindow::keyPressEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Shift) {
+        m_shiftPressed = true;
+        updateGrid();
+    }
+    QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::keyReleaseEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Shift) {
+        m_shiftPressed = false;
+        updateGrid();
+    }
+    QMainWindow::keyReleaseEvent(event);
 }
 
 void MainWindow::onTileItemClicked(QListWidgetItem *item)
@@ -283,29 +413,79 @@ void MainWindow::updateEntityPreview()
     }
 
     try {
-        if (m_entityPreview) {
-            m_scene->removeItem(m_entityPreview);
-            delete m_entityPreview;
-            m_entityPreview = nullptr;
+        clearPreview();
+
+        QSizeF size = m_selectedEntity->getCurrentSize();
+        if (size.isEmpty()) {
+            size = m_selectedEntity->getCollisionSize();
+            if (size.isEmpty()) {
+                size = QSizeF(32, 32);
+            }
         }
 
-        QPixmap fullPixmap = m_selectedEntity->getPixmap();
-        const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+        QPixmap previewPixmap(size.toSize());
+        previewPixmap.fill(Qt::transparent);
+        QPainter painter(&previewPixmap);
 
-        if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
-            qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
-            return;
+        if (m_selectedEntity->isInvisible()) {
+            painter.setPen(QPen(Qt::red, 2));
+            painter.drawRect(previewPixmap.rect().adjusted(1, 1, -1, -1));
+            painter.setFont(QFont("Arial", 8));
+            QString text = m_selectedEntity->getName();
+            QRectF textRect = painter.boundingRect(previewPixmap.rect(), Qt::AlignCenter, text);
+            if (textRect.width() > previewPixmap.width() - 4) {
+                text = painter.fontMetrics().elidedText(text, Qt::ElideRight, previewPixmap.width() - 4);
+            }
+            painter.drawText(previewPixmap.rect(), Qt::AlignCenter, text);
+        } else if (m_selectedEntity->hasOnlyCollision()) {
+            painter.setPen(QPen(Qt::blue, 2));
+            painter.drawRect(previewPixmap.rect().adjusted(1, 1, -1, -1));
+            painter.drawText(previewPixmap.rect(), Qt::AlignCenter, "Collision");
+        } else {
+            QPixmap fullPixmap = m_selectedEntity->getPixmap();
+            const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+
+            if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
+                qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
+                return;
+            }
+
+            QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
+            painter.drawPixmap(previewPixmap.rect(), fullPixmap, spriteRect);
         }
 
-        QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
-        QPixmap tilePixmap = fullPixmap.copy(spriteRect.toRect());
+        m_previewItem = m_scene->addPixmap(previewPixmap);
+        m_previewItem->setOpacity(0.5);
+        m_previewItem->setZValue(1000); // Garantir que fique acima de outros itens
+        m_previewItem->show();
 
-        m_entityPreview = m_scene->addPixmap(tilePixmap);
-        m_entityPreview->setOpacity(0.5);
-        m_entityPreview->setFlag(QGraphicsItem::ItemIsMovable);
-        qCInfo(mainWindowCategory) << "Preview da entidade atualizado para o tile" << m_selectedTileIndex;
+        qCInfo(mainWindowCategory) << "Preview da entidade atualizado para" << m_selectedEntity->getName() 
+                                   << "com tamanho" << size;
+
     } catch (const std::exception& e) {
         handleException("Erro ao atualizar preview da entidade", e);
+    }
+}
+
+void MainWindow::updatePreviewPosition(const QPointF& scenePos)
+{
+    if (m_selectedEntity && m_previewItem) {
+        QPointF adjustedPos = scenePos;
+        if (m_shiftPressed) {
+            QSizeF entitySize = m_selectedEntity->getCurrentSize();
+            if (entitySize.isEmpty()) {
+                entitySize = m_selectedEntity->getCollisionSize();
+                if (entitySize.isEmpty()) {
+                    entitySize = QSizeF(32, 32);
+                }
+            }
+            qreal gridX = qRound(scenePos.x() / entitySize.width()) * entitySize.width();
+            qreal gridY = qRound(scenePos.y() / entitySize.height()) * entitySize.height();
+            adjustedPos = QPointF(gridX, gridY);
+        }
+        m_previewItem->setPos(adjustedPos);
+        m_previewItem->show();
+        qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos << "Shift:" << m_shiftPressed;
     }
 }
 
@@ -338,17 +518,28 @@ void MainWindow::updateTileList()
     }
 
     try {
-        QPixmap entityPixmap = m_selectedEntity->getPixmap();
+        QPixmap entityPixmap;
 
         if (m_selectedEntity->isInvisible()) {
-            // Para entidades invisíveis, crie um pixmap com borda vermelha
             QSizeF collisionSize = m_selectedEntity->getCollisionSize();
+            if (collisionSize.isEmpty()) {
+                collisionSize = QSizeF(32, 32);
+            }
             entityPixmap = QPixmap(collisionSize.toSize());
             entityPixmap.fill(Qt::transparent);
             QPainter painter(&entityPixmap);
             painter.setPen(QPen(Qt::red, 2));
             painter.drawRect(entityPixmap.rect().adjusted(1, 1, -1, -1));
-            painter.drawText(entityPixmap.rect(), Qt::AlignCenter, m_selectedEntity->getName());
+            painter.setFont(QFont("Arial", 8));
+            painter.drawText(entityPixmap.rect(), Qt::AlignCenter, "Invisible\n" + m_selectedEntity->getName());
+
+            // Carregar e desenhar o ícone de entidade invisível
+            QPixmap invisibleIcon(m_projectPath + "/entities/invisible.png");
+            if (!invisibleIcon.isNull()) {
+                painter.drawPixmap(entityPixmap.rect().center() - QPoint(invisibleIcon.width()/2, invisibleIcon.height()/2), invisibleIcon);
+            }
+        } else {
+            entityPixmap = m_selectedEntity->getPixmap();
         }
 
         // Mostrar o spritesheet completo no QLabel
@@ -360,15 +551,21 @@ void MainWindow::updateTileList()
 
         // Adicionar informações sobre os tiles à lista
         const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
-        for (int i = 0; i < spriteDefinitions.size(); ++i) {
-            QListWidgetItem* item = new QListWidgetItem(QString("Tile %1").arg(i));
-            item->setData(Qt::UserRole, i);
+        if (m_selectedEntity->isInvisible() || spriteDefinitions.isEmpty()) {
+            QListWidgetItem* item = new QListWidgetItem("Invisible Entity");
+            item->setData(Qt::UserRole, 0);
             m_tileList->addItem(item);
-            qCInfo(mainWindowCategory) << "Adicionado tile" << i << ":" << spriteDefinitions[i];
+        } else {
+            for (int i = 0; i < spriteDefinitions.size(); ++i) {
+                QListWidgetItem* item = new QListWidgetItem(QString("Tile %1").arg(i));
+                item->setData(Qt::UserRole, i);
+                m_tileList->addItem(item);
+                qCInfo(mainWindowCategory) << "Adicionado tile" << i << ":" << spriteDefinitions[i];
+            }
         }
 
         qCInfo(mainWindowCategory) << "Spritesheet atualizado e lista de tiles preenchida";
-        qCInfo(mainWindowCategory) << "Número de tiles:" << spriteDefinitions.size();
+        qCInfo(mainWindowCategory) << "Número de tiles:" << (m_selectedEntity->isInvisible() ? 1 : spriteDefinitions.size());
         qCInfo(mainWindowCategory) << "Tamanho do pixmap:" << entityPixmap.size();
         qCInfo(mainWindowCategory) << "Entidade é invisível:" << m_selectedEntity->isInvisible();
     } catch (const std::exception& e) {
@@ -376,17 +573,70 @@ void MainWindow::updateTileList()
     }
 }
 
+void MainWindow::changeEvent(QEvent *event)
+{
+    QMainWindow::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange) {
+        if (isMinimized()) {
+            clearPreview();
+        }
+    }
+    else if (event->type() == QEvent::ActivationChange) {
+        if (!isActiveWindow()) {
+            clearPreview();
+        }
+    }
+}
+
+void MainWindow::clearPreview()
+{
+    if (m_previewItem) {
+        m_scene->removeItem(m_previewItem);
+        delete m_previewItem;
+        m_previewItem = nullptr;
+        qCInfo(mainWindowCategory) << "Preview limpo";
+    }
+}
+
+void MainWindow::clearSelection()
+{
+    clearPreview();
+    m_selectedEntity = nullptr;
+    m_selectedTileIndex = -1;
+    qCInfo(mainWindowCategory) << "Seleção limpa";
+}
+
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_sceneView->viewport() && event->type() == QEvent::MouseButtonPress) {
-        QMouseEvent *mouseEvent = dynamic_cast<QMouseEvent*>(event);
-        if (mouseEvent && mouseEvent->button() == Qt::LeftButton) {
-            onSceneViewMousePress(mouseEvent);
+    // Captura global de eventos de teclado para o Shift
+    if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
+        if (keyEvent->key() == Qt::Key_Shift) {
+            updateShiftState(event->type() == QEvent::KeyPress);
             return true;
         }
+    }
+
+    // Funcionalidades existentes
+    if (watched == m_sceneView->viewport()) {
+        if (event->type() == QEvent::MouseMove) {
+            QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+            QPointF scenePos = m_sceneView->mapToScene(mouseEvent->pos());
+            qCInfo(mainWindowCategory) << "Movimento do mouse detectado na cena:" << scenePos;
+            updatePreviewPosition(scenePos);
+            return true;
+        } else if (event->type() == QEvent::MouseButtonPress) {
+            QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton) {
+                QPointF scenePos = m_sceneView->mapToScene(mouseEvent->pos());
+                qCInfo(mainWindowCategory) << "Clique do mouse detectado na cena:" << scenePos;
+                placeEntityInScene(scenePos);
+                return true;
+            }
+        }
     } else if (watched == m_spritesheetLabel && event->type() == QEvent::MouseButtonPress) {
-        QMouseEvent *mouseEvent = dynamic_cast<QMouseEvent*>(event);
-        if (mouseEvent && mouseEvent->button() == Qt::LeftButton) {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::LeftButton) {
             handleTileItemClick(m_spritesheetLabel, mouseEvent->pos());
             return true;
         }
@@ -394,10 +644,22 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     return QMainWindow::eventFilter(watched, event);
 }
 
+void MainWindow::updateShiftState(bool pressed)
+{
+    m_shiftPressed = pressed;
+    updateGrid(); // Atualiza a grid com base no novo estado do Shift
+    if (m_previewItem) {
+        updatePreviewPosition(m_previewItem->pos()); // Atualiza a posição do preview
+    }
+    qCInfo(mainWindowCategory) << "Estado do Shift atualizado:" << (pressed ? "pressionado" : "liberado");
+}
+
 void MainWindow::onSceneViewMousePress(QMouseEvent *event)
 {
-    QPointF scenePos = m_sceneView->mapToScene(event->pos());
-    placeEntityInScene(scenePos);
+    if (event->button() == Qt::LeftButton && m_selectedEntity) {
+        QPointF scenePos = m_sceneView->mapToScene(event->pos());
+        placeEntityInScene(scenePos);
+    }
 }
 
 void MainWindow::placeEntityInScene(const QPointF &pos)
@@ -408,72 +670,138 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
     }
 
     try {
-        QPixmap fullPixmap = m_selectedEntity->getPixmap();
-        const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
-        QSizeF collisionSize = m_selectedEntity->getCollisionSize();
+        qCInfo(mainWindowCategory) << "Iniciando colocação de entidade:" << m_selectedEntity->getName();
+        qCInfo(mainWindowCategory) << "Posição inicial:" << pos;
+        qCInfo(mainWindowCategory) << "Entidade é invisível:" << m_selectedEntity->isInvisible();
 
-        if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
-            qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
-            return;
-        }
-
-        QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
-        QPixmap tilePixmap;
-
-        if (m_selectedEntity->isInvisible()) {
-            tilePixmap = QPixmap(collisionSize.toSize());
-            tilePixmap.fill(Qt::transparent);
-            QPainter painter(&tilePixmap);
-            painter.setPen(QPen(Qt::red, 2));
-            painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
-            painter.drawText(tilePixmap.rect(), Qt::AlignCenter, m_selectedEntity->getName());
-        } else {
-            if (collisionSize.isValid()) {
-                QRect sourceRect(spriteRect.topLeft().toPoint(), collisionSize.toSize());
-                tilePixmap = fullPixmap.copy(sourceRect);
-            } else {
-                tilePixmap = fullPixmap.copy(spriteRect.toRect());
+        QSizeF entitySize = m_selectedEntity->getCurrentSize();
+        if (entitySize.isEmpty()) {
+            entitySize = m_selectedEntity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
             }
         }
+        qCInfo(mainWindowCategory) << "Tamanho da entidade:" << entitySize;
 
         QPointF finalPos = pos;
-        QSizeF tileSize = m_selectedEntity->getCurrentSize();
-
-        // Alinhar à grade apenas quando o Shift estiver pressionado
-        if (QApplication::keyboardModifiers() & Qt::ShiftModifier) {
-            qreal gridX = qRound(pos.x() / tileSize.width()) * tileSize.width();
-            qreal gridY = qRound(pos.y() / tileSize.height()) * tileSize.height();
+        
+        if (m_shiftPressed) {
+            qreal gridX = qRound(pos.x() / entitySize.width()) * entitySize.width();
+            qreal gridY = qRound(pos.y() / entitySize.height()) * entitySize.height();
             finalPos = QPointF(gridX, gridY);
+            qCInfo(mainWindowCategory) << "Posição ajustada à grade:" << finalPos;
         }
 
-        // Remover a pré-visualização anterior, se existir
-        if (m_previewItem) {
-            m_scene->removeItem(m_previewItem);
-            delete m_previewItem;
+        QPixmap tilePixmap(entitySize.toSize());
+        tilePixmap.fill(Qt::transparent);
+        QPainter painter(&tilePixmap);
+
+        if (m_selectedEntity->isInvisible()) {
+            qCInfo(mainWindowCategory) << "Desenhando entidade invisível";
+            painter.setPen(QPen(Qt::red, 2));
+            painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
+            painter.setFont(QFont("Arial", 8));
+            QString text = m_selectedEntity->getName();
+            QRectF textRect = painter.boundingRect(tilePixmap.rect(), Qt::AlignCenter, text);
+            if (textRect.width() > tilePixmap.width() - 4) {
+                text = painter.fontMetrics().elidedText(text, Qt::ElideRight, tilePixmap.width() - 4);
+            }
+            painter.drawText(tilePixmap.rect(), Qt::AlignCenter, text);
+        } else if (m_selectedEntity->hasOnlyCollision()) {
+            qCInfo(mainWindowCategory) << "Desenhando entidade apenas com colisão";
+            painter.setPen(QPen(Qt::blue, 2));
+            painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
+            painter.drawText(tilePixmap.rect(), Qt::AlignCenter, "Collision");
+        } else {
+            qCInfo(mainWindowCategory) << "Desenhando entidade normal";
+            QPixmap fullPixmap = m_selectedEntity->getPixmap();
+            const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+            
+            if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
+                qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
+                return;
+            }
+
+            QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
+            painter.drawPixmap(tilePixmap.rect(), fullPixmap, spriteRect);
         }
 
-        // Criar nova pré-visualização
-        m_previewItem = m_scene->addPixmap(tilePixmap);
-        m_previewItem->setPos(finalPos);
-        m_previewItem->setOpacity(0.5); // Torna a pré-visualização semi-transparente
+        QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
+        item->setPos(finalPos);
+        item->setFlag(QGraphicsItem::ItemIsMovable);
+        item->setFlag(QGraphicsItem::ItemIsSelectable);
 
-        // Se o botão do mouse foi pressionado, coloque a entidade na cena
-        if (QApplication::mouseButtons() & Qt::LeftButton) {
-            QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
-            item->setPos(finalPos);
-            item->setFlag(QGraphicsItem::ItemIsMovable);
-            item->setFlag(QGraphicsItem::ItemIsSelectable);
+        EntityPlacement placement;
+        placement.entity = m_selectedEntity;
+        placement.tileIndex = m_selectedTileIndex;
+        m_entityPlacements[item] = placement;
 
-            // Armazenar informações sobre a entidade colocada
-            EntityPlacement placement;
-            placement.entity = m_selectedEntity;
-            placement.tileIndex = m_selectedTileIndex;
-            m_entityPlacements[item] = placement;
+        updateGrid();
 
-            qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos;
-        }
+        qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos << "com tamanho:" << entitySize;
+        
     } catch (const std::exception& e) {
         handleException("Erro ao colocar entidade na cena", e);
+    }
+}
+
+QPixmap MainWindow::createEntityPixmap(const QSizeF &size)
+{
+    QPixmap pixmap(size.toSize());
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+
+    if (m_selectedEntity->isInvisible()) {
+        painter.setPen(QPen(Qt::red, 2));
+        painter.drawRect(pixmap.rect().adjusted(1, 1, -1, -1));
+        painter.setFont(QFont("Arial", 8));
+        QString text = m_selectedEntity->getName();
+        QRectF textRect = painter.boundingRect(pixmap.rect(), Qt::AlignCenter, text);
+        if (textRect.width() > pixmap.width() - 4) {
+            text = painter.fontMetrics().elidedText(text, Qt::ElideRight, pixmap.width() - 4);
+        }
+        painter.drawText(pixmap.rect(), Qt::AlignCenter, text);
+    } else if (m_selectedEntity->hasOnlyCollision()) {
+        painter.setPen(QPen(Qt::blue, 2));
+        painter.drawRect(pixmap.rect().adjusted(1, 1, -1, -1));
+        painter.drawText(pixmap.rect(), Qt::AlignCenter, "Collision");
+    } else {
+        QPixmap fullPixmap = m_selectedEntity->getPixmap();
+        const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+        
+        if (m_selectedTileIndex >= 0 && m_selectedTileIndex < spriteDefinitions.size()) {
+            QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
+            painter.drawPixmap(pixmap.rect(), fullPixmap, spriteRect);
+        }
+    }
+
+    return pixmap;
+}
+
+void MainWindow::leaveEvent(QEvent *event)
+{
+    QMainWindow::leaveEvent(event);
+    clearPreview();
+}
+
+void MainWindow::onSceneViewMouseMove(QMouseEvent *event)
+{
+    if (m_selectedEntity) {
+        QPointF scenePos = m_sceneView->mapToScene(event->pos());
+        placeEntityInScene(scenePos);
+    }
+}
+
+void MainWindow::updateEntityPositions()
+{
+    for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
+        QGraphicsPixmapItem* item = it.key();
+        const EntityPlacement& placement = it.value();
+        QSizeF tileSize = placement.entity->getCurrentSize();
+        QPointF currentPos = item->pos();
+        qreal gridX = qRound(currentPos.x() / tileSize.width()) * tileSize.width();
+        qreal gridY = qRound(currentPos.y() / tileSize.height()) * tileSize.height();
+        item->setPos(gridX, gridY);
     }
 }
 
@@ -482,6 +810,101 @@ void MainWindow::handleException(const QString &context, const std::exception &e
     QString errorMessage = QString("%1: %2").arg(context).arg(e.what());
     qCCritical(mainWindowCategory) << errorMessage;
     QMessageBox::critical(this, "Erro", errorMessage);
+}
+
+void MainWindow::exportScene()
+{
+    QString fileName = QFileDialog::getSaveFileName(this, tr("Exportar Cena"), "", tr("Arquivos de Cena (*.esc);;Todos os Arquivos (*)"));
+    if (fileName.isEmpty())
+        return;
+
+    QFile file(fileName);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("Erro"), tr("Não foi possível abrir o arquivo para escrita."));
+        return;
+    }
+
+    QXmlStreamWriter xml(&file);
+    xml.setAutoFormatting(true);
+    xml.writeStartDocument();
+
+    xml.writeStartElement("Ethanon");
+
+    // Escrever propriedades da cena
+    xml.writeStartElement("SceneProperties");
+    xml.writeAttribute("lightIntensity", "2");
+    xml.writeAttribute("parallaxIntensity", "0");
+
+    xml.writeStartElement("Ambient");
+    xml.writeAttribute("r", "1");
+    xml.writeAttribute("g", "1");
+    xml.writeAttribute("b", "1");
+    xml.writeEndElement(); // Ambient
+
+    xml.writeStartElement("ZAxisDirection");
+    xml.writeAttribute("x", "0");
+    xml.writeAttribute("y", "-1");
+    xml.writeEndElement(); // ZAxisDirection
+
+    xml.writeEndElement(); // SceneProperties
+
+    // Escrever entidades na cena
+    xml.writeStartElement("EntitiesInScene");
+
+    int entityId = 1;
+    for (const auto& item : m_scene->items()) {
+        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
+        if (pixmapItem) {
+            auto it = m_entityPlacements.find(pixmapItem);
+            if (it != m_entityPlacements.end()) {
+                Entity* entity = it->entity;
+                int tileIndex = it->tileIndex;
+
+                xml.writeStartElement("Entity");
+                xml.writeAttribute("id", QString::number(entityId++));
+                xml.writeAttribute("spriteFrame", QString::number(tileIndex));
+
+                xml.writeTextElement("EntityName", entity->getName() + ".ent");
+
+                // Calcular a posição corrigida
+                QSizeF entitySize = entity->getCurrentSize();
+                if (entitySize.isEmpty()) {
+                    entitySize = entity->getCollisionSize();
+                    if (entitySize.isEmpty()) {
+                        entitySize = QSizeF(32, 32);
+                    }
+                }
+                QPointF correctedPos = pixmapItem->pos() + QPointF(entitySize.width() / 2, entitySize.height() / 2);
+
+                xml.writeStartElement("Position");
+                xml.writeAttribute("x", QString::number(static_cast<int>(correctedPos.x())));
+                xml.writeAttribute("y", QString::number(static_cast<int>(correctedPos.y())));
+                xml.writeAttribute("z", "0");
+                xml.writeAttribute("angle", "0");
+                xml.writeEndElement(); // Position
+
+                xml.writeStartElement("Entity");
+                xml.writeTextElement("FileName", entity->getName() + ".ent");
+                xml.writeEndElement(); // Entity
+
+                xml.writeEndElement(); // Entity
+
+                qCInfo(mainWindowCategory) << "Exportando entidade:" << entity->getName()
+                                           << "na posição:" << correctedPos
+                                           << "tamanho:" << entitySize;
+            }
+        }
+    }
+
+    xml.writeEndElement(); // EntitiesInScene
+
+    xml.writeEndElement(); // Ethanon
+
+    xml.writeEndDocument();
+
+    file.close();
+
+    QMessageBox::information(this, tr("Sucesso"), tr("Cena exportada com sucesso."));
 }
 
 void MainWindow::handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos)
@@ -515,4 +938,22 @@ void MainWindow::handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos
     }
 
     qCWarning(mainWindowCategory) << "Nenhum tile selecionado";
+}
+
+Entity* MainWindow::getEntityForPixmapItem(QGraphicsPixmapItem* item)
+{
+    auto it = m_entityPlacements.find(item);
+    if (it != m_entityPlacements.end()) {
+        return it->entity;
+    }
+    return nullptr;
+}
+
+int MainWindow::getTileIndexForPixmapItem(QGraphicsPixmapItem* item)
+{
+    auto it = m_entityPlacements.find(item);
+    if (it != m_entityPlacements.end()) {
+        return it->tileIndex;
+    }
+    return -1;
 }
