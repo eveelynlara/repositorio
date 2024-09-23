@@ -19,6 +19,9 @@
 #include <QTimer>
 #include <QStack>
 #include <QGraphicsSceneMouseEvent>
+#include <QActionGroup>
+#include <QScrollArea>
+#include <QAction>
 
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
@@ -61,12 +64,13 @@ void MainWindow::setupUI()
     QDockWidget *projectDock = new QDockWidget("Explorador de Projeto", this);
     projectDock->setWidget(m_projectExplorer);
     projectDock->setAllowedAreas(Qt::AllDockWidgetAreas);
-    addDockWidget(Qt::LeftDockWidgetArea, projectDock);
+    this->addDockWidget(Qt::LeftDockWidgetArea, projectDock);
 
     QAction* exportAction = new QAction("Exportar Cena", this);
     connect(exportAction, &QAction::triggered, this, &MainWindow::exportScene);
 
-    QMenu* fileMenu = menuBar()->addMenu("Arquivo");
+    QMenu* fileMenu = this->menuBar()->addMenu("Arquivo");
+
     fileMenu->addAction(exportAction);
 
     // Configurar o explorador de projetos
@@ -83,7 +87,7 @@ void MainWindow::setupUI()
     addDockWidget(Qt::RightDockWidgetArea, m_propertiesDock);
 
     // Configurar a barra de status
-    statusBar()->showMessage("Pronto");
+    this->statusBar()->showMessage("Pronto");
 }
 
 void MainWindow::setupProjectExplorer()
@@ -201,18 +205,44 @@ void MainWindow::setupTileList()
     m_tileList = new QListWidget(this);
     QDockWidget *tileDock = new QDockWidget("Tiles", this);
 
-    // Criar um widget de rolagem para conter o QLabel do spritesheet
+    QVBoxLayout *layout = new QVBoxLayout();
+
+    // Criar a toolbar
+    QToolBar *tileToolbar = new QToolBar(this);
+    tileToolbar->setIconSize(QSize(24, 24));
+    
+    // Adicionar ações à toolbar
+    QAction *selectAction = tileToolbar->addAction(QIcon(":/select.png"), "Select Tool");
+    selectAction->setShortcut(QKeySequence("S"));
+    
+    QAction *brushAction = tileToolbar->addAction(QIcon(":/brush.png"), "Brush Tool");
+    brushAction->setShortcut(QKeySequence("B"));
+
+    // Tornar as ações exclusivas (apenas uma pode estar ativa por vez)
+    QActionGroup *toolGroup = new QActionGroup(this);
+    toolGroup->addAction(selectAction);
+    toolGroup->addAction(brushAction);
+    toolGroup->setExclusive(true);
+
+    // Conectar as ações aos slots correspondentes
+    connect(selectAction, &QAction::triggered, this, &MainWindow::activateSelectTool);
+    connect(brushAction, &QAction::triggered, this, &MainWindow::activateBrushTool);
+
+    // Definir o Brush Tool como padrão
+    brushAction->setChecked(true);
+    m_currentTool = BrushTool;
+
+    // Adicionar a toolbar ao layout
+    layout->addWidget(tileToolbar);
+    
     QScrollArea *scrollArea = new QScrollArea();
     scrollArea->setWidgetResizable(true);
 
-    // Criar um QLabel para mostrar o spritesheet
     m_spritesheetLabel = new QLabel();
     m_spritesheetLabel->setScaledContents(true);
 
     scrollArea->setWidget(m_spritesheetLabel);
 
-    // Criar um layout vertical para conter o scrollArea e o m_tileList
-    QVBoxLayout *layout = new QVBoxLayout();
     layout->addWidget(scrollArea);
     layout->addWidget(m_tileList);
 
@@ -223,8 +253,33 @@ void MainWindow::setupTileList()
     tileDock->setAllowedAreas(Qt::AllDockWidgetAreas);
     addDockWidget(Qt::RightDockWidgetArea, tileDock);
 
-    // Conectar o evento de clique do mouse no QLabel
     m_spritesheetLabel->installEventFilter(this);
+
+    // Conectar o sinal itemClicked do m_tileList ao slot onTileItemClicked
+    connect(m_tileList, &QListWidget::itemClicked, this, &MainWindow::onTileItemClicked);
+}
+
+void MainWindow::activateBrushTool()
+{
+    m_currentTool = BrushTool;
+    m_sceneView->setDragMode(QGraphicsView::NoDrag);
+    m_sceneView->setCursor(Qt::CrossCursor);
+    if (m_previewItem) {
+        m_previewItem->show();
+    }
+    updateToolbarState(); // Atualiza o estado visual da barra de ferramentas
+    qCInfo(mainWindowCategory) << "Ferramenta de pincel ativada";
+}
+
+void MainWindow::updateToolbarState()
+{
+    // Assumindo que você tem ponteiros para as ações das ferramentas como membros da classe
+    if (m_selectAction) {
+        m_selectAction->setChecked(m_currentTool == SelectTool);
+    }
+    if (m_brushAction) {
+        m_brushAction->setChecked(m_currentTool == BrushTool);
+    }
 }
 
 void MainWindow::createActions()
@@ -264,6 +319,24 @@ void MainWindow::createActions()
     QMenu *fileMenu = menuBar()->addMenu("&Arquivo");
     fileMenu->addAction(openProjectAction);
 }
+
+void MainWindow::activateSelectTool()
+{
+    m_currentTool = SelectTool;
+    m_sceneView->setDragMode(QGraphicsView::RubberBandDrag);
+    m_sceneView->setCursor(Qt::ArrowCursor);
+    if (m_previewItem) {
+        m_previewItem->hide();
+    }
+    qCInfo(mainWindowCategory) << "Ferramenta de seleção ativada";
+}
+
+// void MainWindow::activateMoveTool()
+// {
+//     m_currentTool = MoveTool;
+//     m_sceneView->setDragMode(QGraphicsView::NoDrag);
+//     qCInfo(mainWindowCategory) << "Ferramenta de movimento ativada";
+// }
 
 void MainWindow::createMenus()
 {
@@ -400,6 +473,7 @@ void MainWindow::onTileItemClicked(QListWidgetItem *item)
         m_selectedTileIndex = tileIndex;
         updateEntityPreview();
         highlightSelectedTile();
+        activateBrushTool(); // Ativa automaticamente a ferramenta Brush
         qCInfo(mainWindowCategory) << "Tile selecionado:" << tileIndex;
     } catch (const std::exception& e) {
         handleException("Erro ao selecionar tile", e);
@@ -487,7 +561,7 @@ void MainWindow::updateEntityPreview()
 
 void MainWindow::updatePreviewPosition(const QPointF& scenePos)
 {
-    if (m_selectedEntity && m_previewItem) {
+    if (m_currentTool == BrushTool && m_selectedEntity && m_previewItem) {
         QPointF adjustedPos = scenePos;
         if (m_shiftPressed) {
             QSizeF entitySize = m_selectedEntity->getCurrentSize();
@@ -504,6 +578,8 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
         m_previewItem->setPos(adjustedPos);
         m_previewItem->show();
         qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos << "Shift:" << m_shiftPressed;
+    } else if (m_previewItem) {
+        m_previewItem->hide();
     }
 }
 
@@ -661,26 +737,52 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         if (event->type() == QEvent::MouseMove) {
             QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
             QPointF scenePos = m_sceneView->mapToScene(mouseEvent->pos());
-            qCInfo(mainWindowCategory) << "Movimento do mouse detectado na cena:" << scenePos;
-            updatePreviewPosition(scenePos);
+            
+            if (m_currentTool == BrushTool) {
+                updatePreviewPosition(scenePos);
+                if (mouseEvent->buttons() & Qt::LeftButton) {
+                    placeEntityInScene(scenePos);
+                }
+            } else if (m_currentTool == SelectTool) {
+                // Atualizar o cursor ou realizar outras ações específicas da ferramenta de seleção
+                updateCursor(scenePos);
+            }
             return true;
         } else if (event->type() == QEvent::MouseButtonPress) {
             QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
             if (mouseEvent->button() == Qt::LeftButton) {
                 QPointF scenePos = m_sceneView->mapToScene(mouseEvent->pos());
-                qCInfo(mainWindowCategory) << "Clique do mouse detectado na cena:" << scenePos;
-                placeEntityInScene(scenePos);
-                return true;
+                if (m_currentTool == BrushTool) {
+                    placeEntityInScene(scenePos);
+                    return true;
+                } else if (m_currentTool == SelectTool) {
+                    // Lógica para selecionar entidades
+                    QGraphicsItem *item = m_scene->itemAt(scenePos, QTransform());
+                    if (item) {
+                        item->setSelected(!item->isSelected());  // Toggle selection
+                    } else {
+                        m_scene->clearSelection();
+                    }
+                    return true;
+                }
             }
-        }
-    } else if (watched == m_spritesheetLabel && event->type() == QEvent::MouseButtonPress) {
-        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
-        if (mouseEvent->button() == Qt::LeftButton) {
-            handleTileItemClick(m_spritesheetLabel, mouseEvent->pos());
-            return true;
         }
     }
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::updateCursor(const QPointF& scenePos)
+{
+    if (m_currentTool == SelectTool) {
+        QGraphicsItem *item = m_scene->itemAt(scenePos, QTransform());
+        if (item) {
+            m_sceneView->setCursor(Qt::PointingHandCursor);
+        } else {
+            m_sceneView->setCursor(Qt::ArrowCursor);
+        }
+    } else if (m_currentTool == BrushTool) {
+        m_sceneView->setCursor(Qt::CrossCursor);
+    }
 }
 
 void MainWindow::updateShiftState(bool pressed)

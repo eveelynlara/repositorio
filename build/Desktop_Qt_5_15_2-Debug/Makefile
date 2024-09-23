@@ -55,11 +55,13 @@ OBJECTS_DIR   = ./
 SOURCES       = ../../main.cpp \
 		../../mainwindow.cpp \
 		../../entity.cpp \
-		../../entitymanager.cpp moc_mainwindow.cpp
+		../../entitymanager.cpp qrc_resources.cpp \
+		moc_mainwindow.cpp
 OBJECTS       = main.o \
 		mainwindow.o \
 		entity.o \
 		entitymanager.o \
+		qrc_resources.o \
 		moc_mainwindow.o
 DIST          = /Qt/6.7.2/macos/mkspecs/features/spec_pre.prf \
 		/Qt/6.7.2/macos/mkspecs/features/device_config.prf \
@@ -536,6 +538,7 @@ Makefile: ../../Project2.pro ../../../Qt/6.7.2/macos/mkspecs/features/spec_pre.p
 		../../../Qt/6.7.2/macos/mkspecs/features/yacc.prf \
 		../../../Qt/6.7.2/macos/mkspecs/features/lex.prf \
 		../../Project2.pro \
+		../../resources.qrc \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Resources/QtWidgets.prl \
 		../../../Qt/6.7.2/macos/lib/QtGui.framework/Resources/QtGui.prl \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Resources/QtCore.prl
@@ -763,6 +766,7 @@ Makefile: ../../Project2.pro ../../../Qt/6.7.2/macos/mkspecs/features/spec_pre.p
 ../../../Qt/6.7.2/macos/mkspecs/features/yacc.prf:
 ../../../Qt/6.7.2/macos/mkspecs/features/lex.prf:
 ../../Project2.pro:
+../../resources.qrc:
 ../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Resources/QtWidgets.prl:
 ../../../Qt/6.7.2/macos/lib/QtGui.framework/Resources/QtGui.prl:
 ../../../Qt/6.7.2/macos/lib/QtCore.framework/Resources/QtCore.prl:
@@ -790,6 +794,7 @@ dist: distdir FORCE
 distdir: FORCE
 	@test -d $(DISTDIR) || mkdir -p $(DISTDIR)
 	$(COPY_FILE) --parents $(DIST) $(DISTDIR)/
+	$(COPY_FILE) --parents ../../resources.qrc $(DISTDIR)/
 	$(COPY_FILE) --parents ../../mainwindow.h ../../entity.h ../../entitymanager.h $(DISTDIR)/
 	$(COPY_FILE) --parents ../../main.cpp ../../mainwindow.cpp ../../entity.cpp ../../entitymanager.cpp $(DISTDIR)/
 	$(COPY_FILE) --parents ../../mainwindow.ui $(DISTDIR)/
@@ -819,28 +824,56 @@ check: first
 
 benchmark: first
 
-compiler_rcc_make_all:
+compiler_rcc_make_all: qrc_resources.cpp
 compiler_rcc_clean:
+	-$(DEL_FILE) qrc_resources.cpp
+qrc_resources.cpp: ../../resources.qrc \
+		../../../Qt/6.7.2/macos/libexec/rcc \
+		../../eraser.png \
+		../../eyedropper.png \
+		../../move.png \
+		../../fill.png \
+		../../brush.png
+	/Users/lara/Qt/6.7.2/macos/libexec/rcc -name resources --no-zstd ../../resources.qrc -o qrc_resources.cpp
+
 compiler_moc_header_make_all: moc_mainwindow.cpp
 compiler_moc_header_clean:
 	-$(DEL_FILE) moc_mainwindow.cpp
 moc_mainwindow.cpp: ../../mainwindow.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QMainWindow \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qmainwindow.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QTreeView \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qtreeview.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsView \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsview.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QDockWidget \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qdockwidget.h \
-		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QFileSystemModel \
-		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qfilesystemmodel.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsScene \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsscene.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsView \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsview.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QTreeView \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qtreeview.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QFileSystemModel \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qfilesystemmodel.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QListWidget \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qlistwidget.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QDockWidget \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qdockwidget.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QLabel \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qlabel.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QStack \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qstack.h \
+		../../entitymanager.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QVector \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qvector.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QString \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qstring.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QMap \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qmap.h \
+		../../entity.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QPixmap \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qpixmap.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QRectF \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qrect.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QSizeF \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qsize.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QXmlStreamReader \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qxmlstream.h \
 		../../../Qt/6.7.2/macos/libexec/moc
 	/Users/lara/Qt/6.7.2/macos/libexec/moc $(DEFINES) -D__APPLE__ -D__GNUC__=4 -D__APPLE_CC__ -D__cplusplus=199711L -D__APPLE_CC__=6000 -D__clang__ -D__clang_major__=15 -D__clang_minor__=0 -D__clang_patchlevel__=0 -D__GNUC__=4 -D__GNUC_MINOR__=2 -D__GNUC_PATCHLEVEL__=1 -I/Users/lara/Qt/6.7.2/macos/mkspecs/macx-clang -I/Users/lara/Project2 -I/Users/lara/Qt/6.7.2/macos/lib/QtWidgets.framework/Headers -I/Users/lara/Qt/6.7.2/macos/lib/QtGui.framework/Headers -I/Users/lara/Qt/6.7.2/macos/lib/QtCore.framework/Headers -I. -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include/c++/v1 -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/clang/15.0.0/include -I/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.5.sdk/usr/include -I/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/include -F/Users/lara/Qt/6.7.2/macos/lib ../../mainwindow.h -o moc_mainwindow.cpp
 
@@ -863,27 +896,45 @@ compiler_yacc_impl_make_all:
 compiler_yacc_impl_clean:
 compiler_lex_make_all:
 compiler_lex_clean:
-compiler_clean: compiler_moc_header_clean compiler_uic_clean 
+compiler_clean: compiler_rcc_clean compiler_moc_header_clean compiler_uic_clean 
 
 ####### Compile
 
 main.o: ../../main.cpp ../../mainwindow.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QMainWindow \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qmainwindow.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QTreeView \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qtreeview.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsView \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsview.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QDockWidget \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qdockwidget.h \
-		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QFileSystemModel \
-		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qfilesystemmodel.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsScene \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsscene.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsView \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsview.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QTreeView \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qtreeview.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QFileSystemModel \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qfilesystemmodel.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QListWidget \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qlistwidget.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QDockWidget \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qdockwidget.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QLabel \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qlabel.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QStack \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qstack.h \
+		../../entitymanager.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QVector \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qvector.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QString \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qstring.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QMap \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qmap.h \
+		../../entity.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QPixmap \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qpixmap.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QRectF \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qrect.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QSizeF \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qsize.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QXmlStreamReader \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qxmlstream.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QApplication \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qapplication.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o main.o ../../main.cpp
@@ -891,30 +942,38 @@ main.o: ../../main.cpp ../../mainwindow.h \
 mainwindow.o: ../../mainwindow.cpp ../../mainwindow.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QMainWindow \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qmainwindow.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QTreeView \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qtreeview.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsView \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsview.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QDockWidget \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qdockwidget.h \
-		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QFileSystemModel \
-		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qfilesystemmodel.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsScene \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsscene.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsView \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsview.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QTreeView \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qtreeview.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QFileSystemModel \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qfilesystemmodel.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QListWidget \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qlistwidget.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QDockWidget \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qdockwidget.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QLabel \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qlabel.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QStack \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qstack.h \
+		../../entitymanager.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QVector \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qvector.h \
-		../../entity.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QString \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qstring.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QMap \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qmap.h \
+		../../entity.h \
 		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QPixmap \
 		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qpixmap.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QRectF \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qrect.h \
-		../../entitymanager.h \
-		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QMap \
-		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qmap.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QSizeF \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qsize.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QXmlStreamReader \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qxmlstream.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QMenuBar \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qmenubar.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QToolBar \
@@ -928,7 +987,28 @@ mainwindow.o: ../../mainwindow.cpp ../../mainwindow.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QMessageBox \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qmessagebox.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsPixmapItem \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsitem.h
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicsitem.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QMouseEvent \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qevent.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QDebug \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdebug.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QLoggingCategory \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qloggingcategory.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QDir \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdir.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QXmlStreamWriter \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QEvent \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qcoreevent.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QTimer \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qtimer.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsSceneMouseEvent \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qgraphicssceneevent.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QActionGroup \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qactiongroup.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QScrollArea \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qscrollarea.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QAction \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qaction.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o mainwindow.o ../../mainwindow.cpp
 
 entity.o: ../../entity.cpp ../../entity.h \
@@ -940,12 +1020,20 @@ entity.o: ../../entity.cpp ../../entity.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qvector.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QRectF \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qrect.h \
-		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QFile \
-		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qfile.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QSizeF \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qsize.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QXmlStreamReader \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qxmlstream.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QFile \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qfile.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QDebug \
-		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdebug.h
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdebug.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QFileInfo \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qfileinfo.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QDir \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdir.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QPainter \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qpainter.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o entity.o ../../entity.cpp
 
 entitymanager.o: ../../entitymanager.cpp ../../entitymanager.h \
@@ -960,11 +1048,22 @@ entitymanager.o: ../../entitymanager.cpp ../../entitymanager.h \
 		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qpixmap.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QRectF \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qrect.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QSizeF \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qsize.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QXmlStreamReader \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qxmlstream.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QDir \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdir.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QDebug \
-		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdebug.h
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdebug.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QFileInfo \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qfileinfo.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QElapsedTimer \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qelapsedtimer.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o entitymanager.o ../../entitymanager.cpp
+
+qrc_resources.o: qrc_resources.cpp 
+	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o qrc_resources.o qrc_resources.cpp
 
 moc_mainwindow.o: moc_mainwindow.cpp 
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o moc_mainwindow.o moc_mainwindow.cpp

@@ -1,0 +1,10 @@
+<RCC>
+    <qresource prefix="/icons"/>
+    <qresource prefix="/">
+        <file>brush.png</file>
+        <file>eraser.png</file>
+        <file>eyedropper.png</file>
+        <file>fill.png</file>
+        <file>move.png</file>
+    </qresource>
+</RCC>

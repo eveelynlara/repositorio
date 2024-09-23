@@ -26,8 +26,15 @@ public:
     ~MainWindow();
     void updateEntityPositions();
     void requestClearPreview() { clearPreview(); }
+    enum Tool {
+        SelectTool,
+        MoveTool,
+        BrushTool
+    };
 
 private:
+    QAction *m_selectAction;
+    QAction *m_brushAction;
     Ui::MainWindow *ui;
     QGraphicsScene *m_scene;
     QGraphicsView *m_sceneView;
@@ -44,6 +51,7 @@ private:
     QGraphicsPixmapItem *m_previewItem;
     bool m_shiftPressed;
     int m_gridSize;
+    Tool m_currentTool;
 
     struct EntityPlacement {
         Entity *entity;
@@ -70,6 +78,7 @@ private:
     QPointF m_oldPosition;
     QVector<QGraphicsLineItem*> m_gridLines;
 
+    void updateCursor(const QPointF& scenePos);
     void setupUI();
     void setupProjectExplorer();
     void setupSceneView();
@@ -88,6 +97,8 @@ private:
     void drawGridOnSpritesheet();
     void highlightSelectedTile();
     void handleException(const QString &context, const std::exception &e);
+    void updateToolbarState();
+    void updateSpritesheetCursor(const QPoint& pos);
     void handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos);
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
@@ -115,6 +126,8 @@ private slots:
     void onSceneViewMouseMove(QMouseEvent *event);
     void updateShiftState(bool pressed);
     void removeSelectedEntities();
+    void activateSelectTool();
+    void activateBrushTool();
 };
 
 class CustomGraphicsView : public QGraphicsView
