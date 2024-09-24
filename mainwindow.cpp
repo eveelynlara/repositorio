@@ -22,6 +22,7 @@
 #include <QActionGroup>
 #include <QScrollArea>
 #include <QAction>
+#include <QEnterEvent>
 
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
@@ -42,14 +43,15 @@ MainWindow::MainWindow(QWidget *parent)
       m_selectedTileIndex(-1),
       m_previewItem(nullptr),
       m_shiftPressed(false),
-      m_entityPreview(nullptr),
       m_gridSize(0),
       m_currentTool(SelectTool),
-      m_movingItem(nullptr),
-      m_oldPosition(),
       m_previewUpdateTimer(nullptr),
-      m_lastCursorPosition(0, 0),
-      updateCount(0)
+      m_ctrlPressed(false),
+      m_movingItem(nullptr),
+      m_entityPreview(nullptr),
+      m_oldPosition(),
+      updateCount(0),
+      m_lastCursorPosition(0, 0)
 {
     try {
         m_entityManager = new EntityManager();
@@ -93,6 +95,31 @@ MainWindow::~MainWindow()
     delete m_entityManager;
 
     qCInfo(mainWindowCategory) << "MainWindow destruído e recursos liberados";
+}
+
+void MainWindow::eraseEntity()
+{
+    QRectF eraseRect = m_previewItem->sceneBoundingRect();
+    QList<QGraphicsItem*> itemsInRect = m_scene->items(eraseRect);
+    
+    for (QGraphicsItem* item : itemsInRect) {
+        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
+        if (pixmapItem && m_entityPlacements.contains(pixmapItem) && pixmapItem != m_previewItem) {
+            // Adicionar ação para Undo/Redo
+            Action action;
+            action.type = Action::REMOVE;
+            action.item = pixmapItem;
+            action.entity = m_entityPlacements[pixmapItem].entity;
+            action.tileIndex = m_entityPlacements[pixmapItem].tileIndex;
+            action.oldPos = pixmapItem->pos();
+            addAction(action);
+
+            m_scene->removeItem(pixmapItem);
+            m_entityPlacements.remove(pixmapItem);
+            delete pixmapItem;
+            break; // Remove apenas uma entidade por vez
+        }
+    }
 }
 
 void MainWindow::logToFile(const QString& message)
@@ -671,8 +698,14 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
 {
     m_lastCursorPosition = scenePos;
     if (!m_selectedEntity || !m_previewItem) {
-        qCWarning(mainWindowCategory) << "updatePreviewPosition: m_selectedEntity ou m_previewItem é nulo";
-        return;
+        // Em vez de apenas logar, tente recriar o preview se necessário
+        if (m_selectedEntity && !m_previewItem) {
+            updateEntityPreview();
+        }
+        if (!m_selectedEntity || !m_previewItem) {
+            qCWarning(mainWindowCategory) << "updatePreviewPosition: m_selectedEntity ou m_previewItem é nulo";
+            return;
+        }
     }
 
     QPointF adjustedPos = scenePos;
@@ -691,6 +724,22 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
     m_previewItem->setPos(adjustedPos);
     m_previewItem->show();
     qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos << "Shift:" << m_shiftPressed << "TileIndex:" << m_selectedTileIndex;
+}
+
+void MainWindow::recoverSceneState()
+{
+    if (!m_selectedEntity) {
+        // Tente selecionar a última entidade usada
+        if (!m_entityList->selectedItems().isEmpty()) {
+            onEntityItemClicked(m_entityList->selectedItems().first());
+        }
+    }
+
+    if (!m_previewItem && m_selectedEntity) {
+        updateEntityPreview();
+    }
+
+    updateGrid();
 }
 
 void MainWindow::drawGridOnSpritesheet()
@@ -815,7 +864,6 @@ void MainWindow::paintWithBrush(const QPointF &pos)
         }
     }
 
-    // Ajustar a posição para a grade
     qreal gridX = qRound(pos.x() / entitySize.width()) * entitySize.width();
     qreal gridY = qRound(pos.y() / entitySize.height()) * entitySize.height();
     QPointF gridPos(gridX, gridY);
@@ -829,16 +877,29 @@ void MainWindow::paintWithBrush(const QPointF &pos)
     }
 
     // Se não houver entidade, coloque uma nova
-    placeEntityInScene(gridPos);
+    QGraphicsPixmapItem* newItem = placeEntityInScene(gridPos);
+    
+    // Adicionar ação para Undo/Redo
+    Action action;
+    action.type = Action::ADD;
+    action.item = newItem;
+    action.entity = m_selectedEntity;
+    action.tileIndex = m_selectedTileIndex;
+    action.newPos = gridPos;
+    addAction(action);
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    // Captura global de eventos de teclado para o Shift e teclas de seta
+    // Captura global de eventos de teclado para o Shift, Ctrl/Cmd e teclas de seta
     if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
         QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
         if (keyEvent->key() == Qt::Key_Shift) {
             updateShiftState(event->type() == QEvent::KeyPress);
+            return true;
+        } else if (keyEvent->key() == Qt::Key_Control || keyEvent->key() == Qt::Key_Meta) {
+            m_ctrlPressed = (event->type() == QEvent::KeyPress);
+            updateCursor(m_lastCursorPosition);
             return true;
         } else if (event->type() == QEvent::KeyPress && 
                    (keyEvent->key() == Qt::Key_Up || keyEvent->key() == Qt::Key_Down) && 
@@ -874,15 +935,17 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         if (event->type() == QEvent::MouseMove) {
             QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
             QPointF scenePos = m_sceneView->mapToScene(mouseEvent->pos());
+            m_lastCursorPosition = scenePos;
             
             if (m_currentTool == BrushTool) {
                 updatePreviewPosition(scenePos);
                 if (mouseEvent->buttons() & Qt::LeftButton) {
-                    if (m_shiftPressed) {
+                    if (m_ctrlPressed) {
+                        eraseEntity();
+                    } else if (m_shiftPressed) {
                         paintWithBrush(scenePos);
-                    } else {
-                        placeEntityInScene(scenePos);
                     }
+                    // Não colocamos entidades durante o movimento do mouse sem o Shift
                 }
             } else if (m_currentTool == SelectTool) {
                 updateCursor(scenePos);
@@ -893,14 +956,17 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             if (mouseEvent->button() == Qt::LeftButton) {
                 QPointF scenePos = m_sceneView->mapToScene(mouseEvent->pos());
                 if (m_currentTool == BrushTool) {
-                    if (m_shiftPressed) {
+                    if (m_ctrlPressed) {
+                        eraseEntity();
+                    } else if (m_shiftPressed) {
                         paintWithBrush(scenePos);
                     } else {
+                        // Colocar uma única entidade quando não estiver com Shift
                         placeEntityInScene(scenePos);
                     }
                     return true;
                 } else if (m_currentTool == SelectTool) {
-                    // Lógica para selecionar entidades
+                    // Lógica para selecionar entidades (mantenha o código existente)
                     QGraphicsItem *item = m_scene->itemAt(scenePos, QTransform());
                     if (item) {
                         item->setSelected(!item->isSelected());  // Toggle selection
@@ -955,7 +1021,11 @@ void MainWindow::updateCursor(const QPointF& scenePos)
             m_sceneView->setCursor(Qt::ArrowCursor);
         }
     } else if (m_currentTool == BrushTool) {
-        m_sceneView->setCursor(Qt::CrossCursor);
+        if (m_ctrlPressed) {
+            m_sceneView->setCursor(Qt::ForbiddenCursor);
+        } else {
+            m_sceneView->setCursor(Qt::CrossCursor);
+        }
     }
 }
 
@@ -977,11 +1047,11 @@ void MainWindow::onSceneViewMousePress(QMouseEvent *event)
     }
 }
 
-void MainWindow::placeEntityInScene(const QPointF &pos)
+QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos)
 {
     if (!m_selectedEntity) {
         qCWarning(mainWindowCategory) << "Nenhuma entidade selecionada para colocar na cena";
-        return;
+        return nullptr;
     }
 
     try {
@@ -1050,10 +1120,14 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
         qCInfo(mainWindowCategory) << "Foco definido para a lista de tiles";
 
         qCInfo(mainWindowCategory) << "Método placeEntityInScene concluído com sucesso";
+
+        return item;
         
     } catch (const std::exception& e) {
         handleException("Erro ao colocar entidade na cena", e);
     }
+
+     return nullptr; 
 }
 
 void MainWindow::updatePreviewIfNeeded()
@@ -1158,6 +1232,12 @@ void MainWindow::leaveEvent(QEvent *event)
     clearPreview();
 }
 
+void MainWindow::enterEvent(QEnterEvent *event)
+{
+    QMainWindow::enterEvent(event);
+    recoverSceneState();
+}
+
 void MainWindow::onSceneViewMouseMove(QMouseEvent *event)
 {
     if (m_selectedEntity) {
@@ -1195,57 +1275,149 @@ void MainWindow::handleException(const QString &context, const std::exception &e
 void MainWindow::undo()
 {
     if (undoStack.isEmpty()) {
+        qDebug() << "Pilha de undo está vazia";
         return;
     }
 
-    Action action = undoStack.pop();
-    switch (action.type) {
-        case Action::ADD:
-            m_scene->removeItem(action.item);
-            m_entityPlacements.remove(action.item);
-            break;
-        case Action::REMOVE:
-            m_scene->addItem(action.item);
-            m_entityPlacements[action.item] = {action.entity, action.tileIndex};
-            break;
-        case Action::MOVE:
-            action.item->setPos(action.oldPos);
-            break;
-    }
+    try {
+        Action action = undoStack.pop();
+        
+        if (!action.item || !action.entity) {
+            qWarning() << "Ação inválida encontrada na pilha de undo";
+            return;
+        }
 
-    redoStack.push(action);
-    updateGrid();
+        switch (action.type) {
+            case Action::ADD:
+                if (m_scene->items().contains(action.item)) {
+                    m_scene->removeItem(action.item);
+                    m_entityPlacements.remove(action.item);
+                    delete action.item;
+                }
+                break;
+            case Action::REMOVE:
+                {
+                    QGraphicsPixmapItem* newItem = m_scene->addPixmap(createEntityPixmap(action.entity->getCurrentSize()));
+                    newItem->setPos(action.oldPos);
+                    m_entityPlacements[newItem] = {action.entity, action.tileIndex};
+                    action.item = newItem;
+                }
+                break;
+            case Action::MOVE:
+                if (m_scene->items().contains(action.item)) {
+                    action.item->setPos(action.oldPos);
+                }
+                break;
+        }
+
+        redoStack.push(action);
+        updateGrid();
+        qDebug() << "Undo realizado com sucesso";
+    } catch (const std::exception& e) {
+        qCritical() << "Erro durante a operação de desfazer:" << e.what();
+    } catch (...) {
+        qCritical() << "Erro desconhecido durante a operação de desfazer";
+    }
 }
 
 void MainWindow::redo()
 {
     if (redoStack.isEmpty()) {
+        qDebug() << "Pilha de redo está vazia";
         return;
     }
 
-    Action action = redoStack.pop();
-    switch (action.type) {
-        case Action::ADD:
-            m_scene->addItem(action.item);
-            m_entityPlacements[action.item] = {action.entity, action.tileIndex};
-            break;
-        case Action::REMOVE:
-            m_scene->removeItem(action.item);
-            m_entityPlacements.remove(action.item);
-            break;
-        case Action::MOVE:
-            action.item->setPos(action.newPos);
-            break;
-    }
+    try {
+        Action action = redoStack.pop();
+        
+        if (!action.item || !action.entity) {
+            qWarning() << "Ação inválida encontrada na pilha de redo";
+            return;
+        }
 
-    undoStack.push(action);
-    updateGrid();
+        switch (action.type) {
+            case Action::ADD:
+                {
+                    QGraphicsPixmapItem* newItem = m_scene->addPixmap(createEntityPixmap(action.entity->getCurrentSize()));
+                    newItem->setPos(action.newPos);
+                    m_entityPlacements[newItem] = {action.entity, action.tileIndex};
+                    action.item = newItem;
+                }
+                break;
+            case Action::REMOVE:
+                if (m_scene->items().contains(action.item)) {
+                    m_scene->removeItem(action.item);
+                    m_entityPlacements.remove(action.item);
+                    delete action.item;
+                }
+                break;
+            case Action::MOVE:
+                if (m_scene->items().contains(action.item)) {
+                    action.item->setPos(action.newPos);
+                }
+                break;
+        }
+
+        undoStack.push(action);
+        updateGrid();
+        qDebug() << "Redo realizado com sucesso";
+    } catch (const std::exception& e) {
+        qCritical() << "Erro durante a operação de refazer:" << e.what();
+    } catch (...) {
+        qCritical() << "Erro desconhecido durante a operação de refazer";
+    }
 }
 
 void MainWindow::addAction(const Action& action)
 {
+    if (!action.item || !action.entity) {
+        qWarning() << "Tentativa de adicionar uma ação inválida";
+        return;
+    }
     undoStack.push(action);
     redoStack.clear();
+    qDebug() << "Ação adicionada à pilha de undo";
+}
+
+void MainWindow::checkStackConsistency()
+{
+    qDebug() << "Verificando consistência das pilhas:";
+    qDebug() << "  Tamanho da pilha de undo:" << undoStack.size();
+    qDebug() << "  Tamanho da pilha de redo:" << redoStack.size();
+    
+    // Verifique se todos os itens nas pilhas são válidos
+    for (const Action& action : undoStack) {
+        if (!action.item || !action.entity) {
+            qWarning() << "Ação inválida encontrada na pilha de undo";
+        }
+    }
+    for (const Action& action : redoStack) {
+        if (!action.item || !action.entity) {
+            qWarning() << "Ação inválida encontrada na pilha de redo";
+        }
+    }
+}
+
+void MainWindow::checkConsistency()
+{
+    qDebug() << "Verificando consistência:";
+    qDebug() << "  Itens na cena:" << m_scene->items().count();
+    qDebug() << "  Entidades no mapa:" << m_entityPlacements.size();
+    qDebug() << "  Tamanho da pilha de undo:" << undoStack.size();
+    qDebug() << "  Tamanho da pilha de redo:" << redoStack.size();
+}
+
+void MainWindow::saveCrashReport()
+{
+    QFile file("crash_report.txt");
+    if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&file);
+        out << "Crash Report\n";
+        out << "Timestamp: " << QDateTime::currentDateTime().toString() << "\n";
+        out << "Número de entidades: " << m_entityPlacements.size() << "\n";
+        out << "Estado do Shift: " << (m_shiftPressed ? "Pressionado" : "Liberado") << "\n";
+        // Adicione mais informações relevantes
+    }
 }
 
 void MainWindow::exportScene()

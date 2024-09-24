@@ -53,6 +53,7 @@ private:
     bool m_shiftPressed;
     int m_gridSize;
     Tool m_currentTool;
+    bool m_ctrlPressed;
 
     struct EntityPlacement {
         Entity *entity;
@@ -100,7 +101,7 @@ private:
     void updatePreviewPosition(const QPointF& scenePos);
     void clearPreview();
     void clearSelection();
-    void placeEntityInScene(const QPointF &pos);
+    QGraphicsPixmapItem* placeEntityInScene(const QPointF &pos);
     void updateTileList();
     void drawGridOnSpritesheet();
     void highlightSelectedTile();
@@ -112,6 +113,12 @@ private:
     void handleArrowKeyPress(QKeyEvent *event);
     void updatePreviewIfNeeded();
     void paintWithBrush(const QPointF &pos);
+    void eraseEntity();
+    void checkConsistency();
+    void saveCrashReport();
+    void recoverSceneState();
+    void enterEvent(QEvent *event);
+    void checkStackConsistency();
     
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
@@ -129,6 +136,7 @@ protected:
     void leaveEvent(QEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void enterEvent(QEnterEvent *event) override;
 
 private slots:
     void onProjectItemDoubleClicked(const QModelIndex &index);
