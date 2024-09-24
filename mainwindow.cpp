@@ -767,6 +767,12 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                 }
             }
         }
+    } else if (watched == m_spritesheetLabel && event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+        if (mouseEvent->button() == Qt::LeftButton) {
+            handleTileItemClick(m_spritesheetLabel, mouseEvent->pos());
+            return true;
+        }
     }
     return QMainWindow::eventFilter(watched, event);
 }
@@ -1159,6 +1165,8 @@ void MainWindow::handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos
             m_selectedTileIndex = i;
             updateEntityPreview();
             m_tileList->setCurrentRow(i);
+            highlightSelectedTile();
+            activateBrushTool(); // Ativa automaticamente a ferramenta Brush
             qCInfo(mainWindowCategory) << "Tile selecionado:" << i;
             return;
         }
