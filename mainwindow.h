@@ -20,6 +20,7 @@ QT_END_NAMESPACE
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
+    QTimer* m_previewUpdateTimer;
 
 public:
     MainWindow(QWidget *parent = nullptr);
@@ -58,6 +59,12 @@ private:
         int tileIndex;
     };
 
+    void logToFile(const QString& message);
+    void cleanupResources();
+
+    // Adicione esta variável de membro
+    int updateCount;
+
     QMap<QGraphicsPixmapItem*, EntityPlacement> m_entityPlacements;
 
     // Estrutura para armazenar ações
@@ -77,6 +84,7 @@ private:
     QGraphicsPixmapItem *m_entityPreview;
     QPointF m_oldPosition;
     QVector<QGraphicsLineItem*> m_gridLines;
+    QPointF m_lastCursorPosition;
 
     void updateCursor(const QPointF& scenePos);
     void setupUI();
@@ -100,6 +108,10 @@ private:
     void updateToolbarState();
     void updateSpritesheetCursor(const QPoint& pos);
     void handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos);
+    void ensureBrushToolActive();
+    void handleArrowKeyPress(QKeyEvent *event);
+    void updatePreviewIfNeeded();
+    
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
 
@@ -115,6 +127,7 @@ protected:
     void changeEvent(QEvent *event) override;
     void leaveEvent(QEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
 
 private slots:
     void onProjectItemDoubleClicked(const QModelIndex &index);

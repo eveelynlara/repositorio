@@ -26,8 +26,30 @@
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent), m_projectPath(""), m_selectedEntity(nullptr), 
-      m_selectedTileIndex(-1), m_entityPreview(nullptr), m_previewItem(nullptr), m_shiftPressed(false)
+    : QMainWindow(parent),
+      ui(nullptr),
+      m_scene(nullptr),
+      m_sceneView(nullptr),
+      m_entityManager(nullptr),
+      m_projectExplorer(nullptr),
+      m_fileSystemModel(nullptr),
+      m_entityList(nullptr),
+      m_tileList(nullptr),
+      m_propertiesDock(nullptr),
+      m_spritesheetLabel(nullptr),
+      m_projectPath(""),
+      m_selectedEntity(nullptr),
+      m_selectedTileIndex(-1),
+      m_previewItem(nullptr),
+      m_shiftPressed(false),
+      m_entityPreview(nullptr),
+      m_gridSize(0),
+      m_currentTool(SelectTool),
+      m_movingItem(nullptr),
+      m_oldPosition(),
+      m_previewUpdateTimer(nullptr),
+      m_lastCursorPosition(0, 0),
+      updateCount(0)
 {
     try {
         m_entityManager = new EntityManager();
@@ -39,10 +61,10 @@ MainWindow::MainWindow(QWidget *parent)
         resize(1024, 768);
         
         // Criar e configurar o timer para atualização do preview
-        QTimer *previewUpdateTimer = new QTimer(this);
-        previewUpdateTimer->setInterval(16); // Aproximadamente 60 FPS
-        connect(previewUpdateTimer, &QTimer::timeout, this, &MainWindow::updatePreviewContinuously);
-        previewUpdateTimer->start();
+        // m_previewUpdateTimer = new QTimer(this);
+        // m_previewUpdateTimer->setInterval(16); // Aproximadamente 60 FPS
+        // connect(m_previewUpdateTimer, &QTimer::timeout, this, &MainWindow::updatePreviewContinuously);
+        // m_previewUpdateTimer->start();
         
         qApp->installEventFilter(this);
 
@@ -54,7 +76,36 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    if (m_previewUpdateTimer) {
+        m_previewUpdateTimer->stop();
+        delete m_previewUpdateTimer;
+    }
+
+    // Limpar todos os itens da cena
+    if (m_scene) {
+        m_scene->clear();
+    }
+
+    // Limpar o mapa de entidades
+    m_entityPlacements.clear();
+
+    // Deletar o gerenciador de entidades
     delete m_entityManager;
+
+    qCInfo(mainWindowCategory) << "MainWindow destruído e recursos liberados";
+}
+
+void MainWindow::logToFile(const QString& message)
+{
+    static QFile logFile("app_log.txt");
+    if (!logFile.isOpen()) {
+        logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text);
+    }
+    
+    QTextStream out(&logFile);
+    out << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz ")
+        << message << "\n";
+    out.flush();
 }
 
 void MainWindow::setupUI()
@@ -267,7 +318,8 @@ void MainWindow::activateBrushTool()
     if (m_previewItem) {
         m_previewItem->show();
     }
-    updateToolbarState(); // Atualiza o estado visual da barra de ferramentas
+    updateToolbarState();
+    m_tileList->setFocus(); // Define o foco para a lista de tiles
     qCInfo(mainWindowCategory) << "Ferramenta de pincel ativada";
 }
 
@@ -413,6 +465,8 @@ void MainWindow::onEntityItemClicked(QListWidgetItem *item)
         m_selectedTileIndex = 0;
         updateEntityPreview();
         updateTileList();
+        ensureBrushToolActive(); // Ativa a ferramenta de pincel
+        m_tileList->setFocus(); // Define o foco para a lista de tiles
         qCInfo(mainWindowCategory) << "Entidade selecionada:" << entityName;
         
         // Força a atualização do preview na posição atual do mouse
@@ -428,12 +482,42 @@ void MainWindow::onEntityItemClicked(QListWidgetItem *item)
 
 void MainWindow::updatePreviewContinuously()
 {
-    if (m_selectedEntity && m_previewItem) {
+    try {
+        if (!m_selectedEntity) {
+            qCDebug(mainWindowCategory) << "updatePreviewContinuously: Nenhuma entidade selecionada";
+            return;
+        }
+        if (!m_previewItem) {
+            qCDebug(mainWindowCategory) << "updatePreviewContinuously: Nenhum item de preview";
+            return;
+        }
+        if (!m_sceneView) {
+            qCWarning(mainWindowCategory) << "updatePreviewContinuously: m_sceneView é nulo";
+            return;
+        }
+        if (!m_sceneView->viewport()) {
+            qCWarning(mainWindowCategory) << "updatePreviewContinuously: viewport é nulo";
+            return;
+        }
+
         QPoint globalPos = QCursor::pos();
         QPoint viewportPos = m_sceneView->viewport()->mapFromGlobal(globalPos);
         QPointF scenePos = m_sceneView->mapToScene(viewportPos);
+        
+        qCDebug(mainWindowCategory) << "updatePreviewContinuously: Atualizando posição do preview para" << scenePos;
+        
         updatePreviewPosition(scenePos);
+        
         qCInfo(mainWindowCategory) << "Preview atualizado continuamente para posição:" << scenePos;
+
+        updateCount++;
+        if (updateCount >= 100) {
+            cleanupResources();
+            updateCount = 0;
+        }
+
+    } catch (const std::exception& e) {
+        handleException("Erro ao atualizar preview continuamente", e);
     }
 }
 
@@ -442,8 +526,40 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
     if (event->key() == Qt::Key_Shift) {
         m_shiftPressed = true;
         updateGrid();
+    } else if ((event->key() == Qt::Key_Up || event->key() == Qt::Key_Down) && m_currentTool == BrushTool) {
+        event->accept(); // Impede que o evento seja propagado para a cena
+        if (m_selectedEntity && m_tileList->count() > 0) {
+            int currentRow = m_tileList->currentRow();
+            int newRow;
+            
+            if (event->key() == Qt::Key_Up) {
+                newRow = (currentRow - 1 + m_tileList->count()) % m_tileList->count();
+            } else {
+                newRow = (currentRow + 1) % m_tileList->count();
+            }
+            
+            m_tileList->setCurrentRow(newRow);
+            QListWidgetItem *newItem = m_tileList->item(newRow);
+            if (newItem) {
+                m_selectedTileIndex = newItem->data(Qt::UserRole).toInt();
+                qCInfo(mainWindowCategory) << "Tecla de seta pressionada. Novo índice de tile:" << m_selectedTileIndex;
+                updateEntityPreview();
+                highlightSelectedTile();
+                updatePreviewPosition(m_lastCursorPosition);
+            }
+        }
+    } else {
+        QMainWindow::keyPressEvent(event);
     }
-    QMainWindow::keyPressEvent(event);
+}
+
+void MainWindow::ensureBrushToolActive()
+{
+    if (m_currentTool != BrushTool) {
+        m_currentTool = BrushTool;
+        // Atualize a interface do usuário para refletir a mudança de ferramenta
+        updateToolbarState();
+    }
 }
 
 void MainWindow::keyReleaseEvent(QKeyEvent *event)
@@ -474,6 +590,15 @@ void MainWindow::onTileItemClicked(QListWidgetItem *item)
         updateEntityPreview();
         highlightSelectedTile();
         activateBrushTool(); // Ativa automaticamente a ferramenta Brush
+
+        // Atualizar a posição do preview se ele existir
+        if (m_previewItem) {
+            QPoint globalPos = QCursor::pos();
+            QPoint viewportPos = m_sceneView->viewport()->mapFromGlobal(globalPos);
+            QPointF scenePos = m_sceneView->mapToScene(viewportPos);
+            updatePreviewPosition(scenePos);
+        }
+
         qCInfo(mainWindowCategory) << "Tile selecionado:" << tileIndex;
     } catch (const std::exception& e) {
         handleException("Erro ao selecionar tile", e);
@@ -482,6 +607,8 @@ void MainWindow::onTileItemClicked(QListWidgetItem *item)
 
 void MainWindow::highlightSelectedTile()
 {
+    qCInfo(mainWindowCategory) << "Iniciando highlightSelectedTile com m_selectedTileIndex:" << m_selectedTileIndex;
+    
     if (!m_selectedEntity) return;
 
     QPixmap originalPixmap = m_selectedEntity->getPixmap();
@@ -495,18 +622,20 @@ void MainWindow::highlightSelectedTile()
     }
 
     m_spritesheetLabel->setPixmap(highlightPixmap);
+    
+    qCInfo(mainWindowCategory) << "Tile destacado:" << m_selectedTileIndex;
 }
 
 void MainWindow::updateEntityPreview()
 {
+    qCInfo(mainWindowCategory) << "Iniciando updateEntityPreview com m_selectedTileIndex:" << m_selectedTileIndex;
+    
     if (!m_selectedEntity) {
         qCWarning(mainWindowCategory) << "Nenhuma entidade selecionada para atualizar o preview";
         return;
     }
 
     try {
-        clearPreview();
-
         QSizeF size = m_selectedEntity->getCurrentSize();
         if (size.isEmpty()) {
             size = m_selectedEntity->getCollisionSize();
@@ -515,44 +644,23 @@ void MainWindow::updateEntityPreview()
             }
         }
 
-        QPixmap previewPixmap(size.toSize());
-        previewPixmap.fill(Qt::transparent);
-        QPainter painter(&previewPixmap);
+        QPixmap previewPixmap = createEntityPixmap(size);
 
-        if (m_selectedEntity->isInvisible()) {
-            painter.setPen(QPen(Qt::red, 2));
-            painter.drawRect(previewPixmap.rect().adjusted(1, 1, -1, -1));
-            painter.setFont(QFont("Arial", 8));
-            QString text = m_selectedEntity->getName();
-            QRectF textRect = painter.boundingRect(previewPixmap.rect(), Qt::AlignCenter, text);
-            if (textRect.width() > previewPixmap.width() - 4) {
-                text = painter.fontMetrics().elidedText(text, Qt::ElideRight, previewPixmap.width() - 4);
-            }
-            painter.drawText(previewPixmap.rect(), Qt::AlignCenter, text);
-        } else if (m_selectedEntity->hasOnlyCollision()) {
-            painter.setPen(QPen(Qt::blue, 2));
-            painter.drawRect(previewPixmap.rect().adjusted(1, 1, -1, -1));
-            painter.drawText(previewPixmap.rect(), Qt::AlignCenter, "Collision");
+        if (!m_previewItem) {
+            m_previewItem = m_scene->addPixmap(previewPixmap);
+            m_previewItem->setOpacity(0.5);
+            m_previewItem->setZValue(1000);
         } else {
-            QPixmap fullPixmap = m_selectedEntity->getPixmap();
-            const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
-
-            if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
-                qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
-                return;
-            }
-
-            QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
-            painter.drawPixmap(previewPixmap.rect(), fullPixmap, spriteRect);
+            m_previewItem->setPixmap(previewPixmap);
         }
 
-        m_previewItem = m_scene->addPixmap(previewPixmap);
-        m_previewItem->setOpacity(0.5);
-        m_previewItem->setZValue(1000); // Garantir que fique acima de outros itens
         m_previewItem->show();
 
+        // Atualizar a posição do preview
+        updatePreviewPosition(m_lastCursorPosition);
+
         qCInfo(mainWindowCategory) << "Preview da entidade atualizado para" << m_selectedEntity->getName() 
-                                   << "com tamanho" << size;
+                                   << "com tamanho" << size << "e tile index" << m_selectedTileIndex;
 
     } catch (const std::exception& e) {
         handleException("Erro ao atualizar preview da entidade", e);
@@ -561,26 +669,28 @@ void MainWindow::updateEntityPreview()
 
 void MainWindow::updatePreviewPosition(const QPointF& scenePos)
 {
-    if (m_currentTool == BrushTool && m_selectedEntity && m_previewItem) {
-        QPointF adjustedPos = scenePos;
-        if (m_shiftPressed) {
-            QSizeF entitySize = m_selectedEntity->getCurrentSize();
-            if (entitySize.isEmpty()) {
-                entitySize = m_selectedEntity->getCollisionSize();
-                if (entitySize.isEmpty()) {
-                    entitySize = QSizeF(32, 32);
-                }
-            }
-            qreal gridX = qRound(scenePos.x() / entitySize.width()) * entitySize.width();
-            qreal gridY = qRound(scenePos.y() / entitySize.height()) * entitySize.height();
-            adjustedPos = QPointF(gridX, gridY);
-        }
-        m_previewItem->setPos(adjustedPos);
-        m_previewItem->show();
-        qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos << "Shift:" << m_shiftPressed;
-    } else if (m_previewItem) {
-        m_previewItem->hide();
+    m_lastCursorPosition = scenePos;
+    if (!m_selectedEntity || !m_previewItem) {
+        qCWarning(mainWindowCategory) << "updatePreviewPosition: m_selectedEntity ou m_previewItem é nulo";
+        return;
     }
+
+    QPointF adjustedPos = scenePos;
+    if (m_shiftPressed) {
+        QSizeF entitySize = m_selectedEntity->getCurrentSize();
+        if (entitySize.isEmpty()) {
+            entitySize = m_selectedEntity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
+            }
+        }
+        qreal gridX = qRound(scenePos.x() / entitySize.width()) * entitySize.width();
+        qreal gridY = qRound(scenePos.y() / entitySize.height()) * entitySize.height();
+        adjustedPos = QPointF(gridX, gridY);
+    }
+    m_previewItem->setPos(adjustedPos);
+    m_previewItem->show();
+    qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos << "Shift:" << m_shiftPressed << "TileIndex:" << m_selectedTileIndex;
 }
 
 void MainWindow::drawGridOnSpritesheet()
@@ -688,25 +798,21 @@ void MainWindow::clearPreview()
         m_scene->removeItem(m_previewItem);
         delete m_previewItem;
         m_previewItem = nullptr;
-        qCInfo(mainWindowCategory) << "Preview limpo";
     }
-}
-
-void MainWindow::clearSelection()
-{
-    clearPreview();
-    m_selectedEntity = nullptr;
-    m_selectedTileIndex = -1;
-    qCInfo(mainWindowCategory) << "Seleção limpa";
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    // Captura global de eventos de teclado para o Shift
+    // Captura global de eventos de teclado para o Shift e teclas de seta
     if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease) {
         QKeyEvent *keyEvent = static_cast<QKeyEvent*>(event);
         if (keyEvent->key() == Qt::Key_Shift) {
             updateShiftState(event->type() == QEvent::KeyPress);
+            return true;
+        } else if (event->type() == QEvent::KeyPress && 
+                   (keyEvent->key() == Qt::Key_Up || keyEvent->key() == Qt::Key_Down) && 
+                   m_currentTool == BrushTool) {
+            handleArrowKeyPress(keyEvent);
             return true;
         }
     }
@@ -777,6 +883,30 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     return QMainWindow::eventFilter(watched, event);
 }
 
+void MainWindow::handleArrowKeyPress(QKeyEvent *event)
+{
+    if (m_selectedEntity && m_tileList->count() > 0) {
+        int currentRow = m_tileList->currentRow();
+        int newRow;
+        
+        if (event->key() == Qt::Key_Up) {
+            newRow = (currentRow - 1 + m_tileList->count()) % m_tileList->count();
+        } else {
+            newRow = (currentRow + 1) % m_tileList->count();
+        }
+        
+        m_tileList->setCurrentRow(newRow);
+        QListWidgetItem *newItem = m_tileList->item(newRow);
+        if (newItem) {
+            m_selectedTileIndex = newItem->data(Qt::UserRole).toInt();
+            qCInfo(mainWindowCategory) << "Tecla de seta pressionada. Novo índice de tile:" << m_selectedTileIndex;
+            updateEntityPreview();
+            highlightSelectedTile();
+            updatePreviewPosition(m_lastCursorPosition);
+        }
+    }
+}
+
 void MainWindow::updateCursor(const QPointF& scenePos)
 {
     if (m_currentTool == SelectTool) {
@@ -839,49 +969,23 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
             qCInfo(mainWindowCategory) << "Posição ajustada à grade:" << finalPos;
         }
 
-        QPixmap tilePixmap(entitySize.toSize());
-        tilePixmap.fill(Qt::transparent);
-        QPainter painter(&tilePixmap);
-
-        if (m_selectedEntity->isInvisible()) {
-            qCInfo(mainWindowCategory) << "Desenhando entidade invisível";
-            painter.setPen(QPen(Qt::red, 2));
-            painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
-            painter.setFont(QFont("Arial", 8));
-            QString text = m_selectedEntity->getName();
-            QRectF textRect = painter.boundingRect(tilePixmap.rect(), Qt::AlignCenter, text);
-            if (textRect.width() > tilePixmap.width() - 4) {
-                text = painter.fontMetrics().elidedText(text, Qt::ElideRight, tilePixmap.width() - 4);
-            }
-            painter.drawText(tilePixmap.rect(), Qt::AlignCenter, text);
-        } else if (m_selectedEntity->hasOnlyCollision()) {
-            qCInfo(mainWindowCategory) << "Desenhando entidade apenas com colisão";
-            painter.setPen(QPen(Qt::blue, 2));
-            painter.drawRect(tilePixmap.rect().adjusted(1, 1, -1, -1));
-            painter.drawText(tilePixmap.rect(), Qt::AlignCenter, "Collision");
-        } else {
-            qCInfo(mainWindowCategory) << "Desenhando entidade normal";
-            QPixmap fullPixmap = m_selectedEntity->getPixmap();
-            const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
-            
-            if (m_selectedTileIndex < 0 || m_selectedTileIndex >= spriteDefinitions.size()) {
-                qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
-                return;
-            }
-
-            QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
-            painter.drawPixmap(tilePixmap.rect(), fullPixmap, spriteRect);
-        }
-
+        QPixmap tilePixmap = createEntityPixmap(entitySize);
         QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
         item->setPos(finalPos);
         item->setFlag(QGraphicsItem::ItemIsMovable);
         item->setFlag(QGraphicsItem::ItemIsSelectable);
 
+        // Verificar se o item foi adicionado corretamente
+        if (!m_scene->items().contains(item)) {
+            qCWarning(mainWindowCategory) << "Item não foi adicionado à cena corretamente";
+        }
+
         EntityPlacement placement;
         placement.entity = m_selectedEntity;
         placement.tileIndex = m_selectedTileIndex;
         m_entityPlacements[item] = placement;
+
+        qCInfo(mainWindowCategory) << "Placement adicionado ao mapa de entidades";
 
         // Adicionar ação para Undo/Redo
         Action action;
@@ -891,13 +995,36 @@ void MainWindow::placeEntityInScene(const QPointF &pos)
         action.tileIndex = m_selectedTileIndex;
         action.newPos = finalPos;
         addAction(action);
+        qCInfo(mainWindowCategory) << "Ação adicionada para Undo/Redo";
 
         updateGrid();
+        qCInfo(mainWindowCategory) << "Grade atualizada";
+
+        // Atualizar o preview após colocar a entidade
+        updateEntityPreview();
+        qCInfo(mainWindowCategory) << "Preview da entidade atualizado";
 
         qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos << "com tamanho:" << entitySize;
+        logToFile("Entidade colocada na cena: " + m_selectedEntity->getName());
+        
+        // Manter o foco na lista de tiles
+        m_tileList->setFocus();
+        qCInfo(mainWindowCategory) << "Foco definido para a lista de tiles";
+
+        qCInfo(mainWindowCategory) << "Método placeEntityInScene concluído com sucesso";
         
     } catch (const std::exception& e) {
         handleException("Erro ao colocar entidade na cena", e);
+    }
+}
+
+void MainWindow::updatePreviewIfNeeded()
+{
+    if (m_selectedEntity && m_previewItem) {
+        QPoint globalPos = QCursor::pos();
+        QPoint viewportPos = m_sceneView->viewport()->mapFromGlobal(globalPos);
+        QPointF scenePos = m_sceneView->mapToScene(viewportPos);
+        updatePreviewPosition(scenePos);
     }
 }
 
@@ -906,6 +1033,8 @@ QPixmap MainWindow::createEntityPixmap(const QSizeF &size)
     QPixmap pixmap(size.toSize());
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
+
+    qCInfo(mainWindowCategory) << "Criando pixmap com tamanho:" << size << "e tile index:" << m_selectedTileIndex;
 
     if (m_selectedEntity->isInvisible()) {
         painter.setPen(QPen(Qt::red, 2));
@@ -917,21 +1046,51 @@ QPixmap MainWindow::createEntityPixmap(const QSizeF &size)
             text = painter.fontMetrics().elidedText(text, Qt::ElideRight, pixmap.width() - 4);
         }
         painter.drawText(pixmap.rect(), Qt::AlignCenter, text);
+        qCInfo(mainWindowCategory) << "Desenhando entidade invisível";
     } else if (m_selectedEntity->hasOnlyCollision()) {
         painter.setPen(QPen(Qt::blue, 2));
         painter.drawRect(pixmap.rect().adjusted(1, 1, -1, -1));
         painter.drawText(pixmap.rect(), Qt::AlignCenter, "Collision");
+        qCInfo(mainWindowCategory) << "Desenhando entidade apenas com colisão";
     } else {
         QPixmap fullPixmap = m_selectedEntity->getPixmap();
         const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
         
+        qCInfo(mainWindowCategory) << "Número de sprites:" << spriteDefinitions.size();
+        
         if (m_selectedTileIndex >= 0 && m_selectedTileIndex < spriteDefinitions.size()) {
             QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
             painter.drawPixmap(pixmap.rect(), fullPixmap, spriteRect);
+            qCInfo(mainWindowCategory) << "Desenhando sprite" << m_selectedTileIndex << "na posição" << spriteRect;
+        } else {
+            qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
         }
     }
 
     return pixmap;
+}
+
+void MainWindow::cleanupResources()
+{
+    // Remover itens órfãos da cena
+    QList<QGraphicsItem*> orphanItems = m_scene->items();
+    for (QGraphicsItem* item : orphanItems) {
+        if (!m_entityPlacements.contains(static_cast<QGraphicsPixmapItem*>(item))) {
+            m_scene->removeItem(item);
+            delete item;
+        }
+    }
+
+    // Limpar o mapa de entidades
+    for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end();) {
+        if (!m_scene->items().contains(it.key())) {
+            it = m_entityPlacements.erase(it);
+        } else {
+            ++it;
+        }
+    }
+
+    qCInfo(mainWindowCategory) << "Recursos não utilizados foram limpos";
 }
 
 void MainWindow::removeSelectedEntities()
@@ -967,6 +1126,12 @@ void MainWindow::onSceneViewMouseMove(QMouseEvent *event)
         QPointF scenePos = m_sceneView->mapToScene(event->pos());
         placeEntityInScene(scenePos);
     }
+}
+
+void MainWindow::mouseMoveEvent(QMouseEvent *event)
+{
+    QMainWindow::mouseMoveEvent(event);
+    updatePreviewIfNeeded();
 }
 
 void MainWindow::updateEntityPositions()
