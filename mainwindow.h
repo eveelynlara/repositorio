@@ -111,6 +111,7 @@ private:
     void ensureBrushToolActive();
     void handleArrowKeyPress(QKeyEvent *event);
     void updatePreviewIfNeeded();
+    void paintWithBrush(const QPointF &pos);
     
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);

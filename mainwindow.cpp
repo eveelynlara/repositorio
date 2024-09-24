@@ -801,6 +801,37 @@ void MainWindow::clearPreview()
     }
 }
 
+void MainWindow::paintWithBrush(const QPointF &pos)
+{
+    if (!m_selectedEntity || !m_previewItem) {
+        return;
+    }
+
+    QSizeF entitySize = m_selectedEntity->getCurrentSize();
+    if (entitySize.isEmpty()) {
+        entitySize = m_selectedEntity->getCollisionSize();
+        if (entitySize.isEmpty()) {
+            entitySize = QSizeF(32, 32);
+        }
+    }
+
+    // Ajustar a posição para a grade
+    qreal gridX = qRound(pos.x() / entitySize.width()) * entitySize.width();
+    qreal gridY = qRound(pos.y() / entitySize.height()) * entitySize.height();
+    QPointF gridPos(gridX, gridY);
+
+    // Verificar se já existe uma entidade nesta posição
+    QList<QGraphicsItem*> itemsAtPos = m_scene->items(gridPos);
+    for (QGraphicsItem* item : itemsAtPos) {
+        if (m_entityPlacements.contains(dynamic_cast<QGraphicsPixmapItem*>(item))) {
+            return; // Já existe uma entidade nesta posição, não faça nada
+        }
+    }
+
+    // Se não houver entidade, coloque uma nova
+    placeEntityInScene(gridPos);
+}
+
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
     // Captura global de eventos de teclado para o Shift e teclas de seta
@@ -847,10 +878,13 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             if (m_currentTool == BrushTool) {
                 updatePreviewPosition(scenePos);
                 if (mouseEvent->buttons() & Qt::LeftButton) {
-                    placeEntityInScene(scenePos);
+                    if (m_shiftPressed) {
+                        paintWithBrush(scenePos);
+                    } else {
+                        placeEntityInScene(scenePos);
+                    }
                 }
             } else if (m_currentTool == SelectTool) {
-                // Atualizar o cursor ou realizar outras ações específicas da ferramenta de seleção
                 updateCursor(scenePos);
             }
             return true;
@@ -859,7 +893,11 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             if (mouseEvent->button() == Qt::LeftButton) {
                 QPointF scenePos = m_sceneView->mapToScene(mouseEvent->pos());
                 if (m_currentTool == BrushTool) {
-                    placeEntityInScene(scenePos);
+                    if (m_shiftPressed) {
+                        paintWithBrush(scenePos);
+                    } else {
+                        placeEntityInScene(scenePos);
+                    }
                     return true;
                 } else if (m_currentTool == SelectTool) {
                     // Lógica para selecionar entidades
@@ -924,9 +962,9 @@ void MainWindow::updateCursor(const QPointF& scenePos)
 void MainWindow::updateShiftState(bool pressed)
 {
     m_shiftPressed = pressed;
-    updateGrid(); // Atualiza a grid com base no novo estado do Shift
+    updateGrid();
     if (m_previewItem) {
-        updatePreviewPosition(m_previewItem->pos()); // Atualiza a posição do preview
+        updatePreviewPosition(m_lastCursorPosition);
     }
     qCInfo(mainWindowCategory) << "Estado do Shift atualizado:" << (pressed ? "pressionado" : "liberado");
 }
