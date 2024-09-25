@@ -95,7 +95,6 @@ private:
     void setupEntityList();
     void setupTileList();
     void createActions();
-    void createMenus();
     void loadEntities();
     void updateGrid();
     void updateEntityPreview();

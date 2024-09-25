@@ -58,7 +58,6 @@ MainWindow::MainWindow(QWidget *parent)
         setupUI();
         setupSceneView();
         createActions();
-        createMenus();
         setWindowTitle("Editor de Cena");
         resize(1024, 768);
         
@@ -153,15 +152,6 @@ void MainWindow::setupUI()
     redoAction = new QAction("Redo", this);
     redoAction->setShortcut(QKeySequence::Redo);
     connect(redoAction, &QAction::triggered, this, &MainWindow::redo);
-
-    // Adicione as ações a um menu, se desejar
-    QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
-    editMenu->addAction(undoAction);
-    editMenu->addAction(redoAction);
-
-    QMenu* fileMenu = this->menuBar()->addMenu("Arquivo");
-
-    fileMenu->addAction(exportAction);
 
     // Configurar o explorador de projetos
     setupProjectExplorer();
@@ -375,40 +365,44 @@ void MainWindow::updateToolbarState()
 
 void MainWindow::createActions()
 {
-
     // Ação para desfazer
-    QAction *undoAction = new QAction("Desfazer", this);
+    QAction *undoAction = new QAction("Undo", this);
     undoAction->setShortcut(QKeySequence::Undo);
     connect(undoAction, &QAction::triggered, this, &MainWindow::undo);
 
     // Ação para refazer
-    QAction *redoAction = new QAction("Refazer", this);
+    QAction *redoAction = new QAction("Redo", this);
     redoAction->setShortcut(QKeySequence::Redo);
     connect(redoAction, &QAction::triggered, this, &MainWindow::redo);
 
-    // Adicione as ações ao menu Editar
-    QMenu *editMenu = menuBar()->addMenu("&Editar");
-    editMenu->addAction(undoAction);
-    editMenu->addAction(redoAction);
-
     // Ação para abrir um projeto
-    QAction *openProjectAction = new QAction("Abrir Projeto", this);
+    QAction *openProjectAction = new QAction("Open Project", this);
     connect(openProjectAction, &QAction::triggered, this, [this]() {
-        QString dir = QFileDialog::getExistingDirectory(this, "Selecione o Diretório do Projeto",
+        QString dir = QFileDialog::getExistingDirectory(this, "Select Project Directory",
                                                         QDir::homePath(),
                                                         QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
         if (!dir.isEmpty()) {
             m_projectPath = dir;
             m_fileSystemModel->setRootPath(m_projectPath);
             m_projectExplorer->setRootIndex(m_fileSystemModel->index(m_projectPath));
-            statusBar()->showMessage("Projeto aberto: " + m_projectPath);
+            statusBar()->showMessage("Project opened: " + m_projectPath);
             loadEntities();
         }
     });
 
-    // Adicione a ação ao menu Arquivo
-    QMenu *fileMenu = menuBar()->addMenu("&Arquivo");
+    // Ação para exportar a cena
+    QAction *exportAction = new QAction("Export Scene", this);
+    connect(exportAction, &QAction::triggered, this, &MainWindow::exportScene);
+
+    // Criar o menu File
+    QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction(openProjectAction);
+    fileMenu->addAction(exportAction);
+
+    // Criar o menu Edit
+    QMenu *editMenu = menuBar()->addMenu("&Edit");
+    editMenu->addAction(undoAction);
+    editMenu->addAction(redoAction);
 }
 
 void MainWindow::activateSelectTool()
@@ -428,11 +422,6 @@ void MainWindow::activateSelectTool()
 //     m_sceneView->setDragMode(QGraphicsView::NoDrag);
 //     qCInfo(mainWindowCategory) << "Ferramenta de movimento ativada";
 // }
-
-void MainWindow::createMenus()
-{
-    // Os menus já foram criados em createActions()
-}
 
 void MainWindow::loadEntities()
 {
