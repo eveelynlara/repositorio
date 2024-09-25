@@ -32,6 +32,7 @@ public:
         MoveTool,
         BrushTool
     };
+    QGraphicsPixmapItem* placeEntityInScene(const QPointF &pos, bool addToUndoStack = true);
 
 private:
     QMap<QPair<int, int>, bool> m_occupiedPositions;
@@ -102,7 +103,6 @@ private:
     void updatePreviewPosition(const QPointF& scenePos);
     void clearPreview();
     void clearSelection();
-    QGraphicsPixmapItem* placeEntityInScene(const QPointF &pos);
     void updateTileList();
     void drawGridOnSpritesheet();
     void highlightSelectedTile();

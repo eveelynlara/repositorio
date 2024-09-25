@@ -1076,7 +1076,7 @@ void MainWindow::onSceneViewMousePress(QMouseEvent *event)
     }
 }
 
-QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos)
+QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndoStack)
 {
     if (!m_selectedEntity) {
         qCWarning(mainWindowCategory) << "Nenhuma entidade selecionada para colocar na cena";
@@ -1123,14 +1123,16 @@ QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos)
 
         qCInfo(mainWindowCategory) << "Placement adicionado ao mapa de entidades. Total de placements:" << m_entityPlacements.size();
 
-        // Adicionar ação para Undo/Redo
-        Action action;
-        action.type = Action::ADD;
-        action.entity = m_selectedEntity;
-        action.tileIndex = m_selectedTileIndex;
-        action.newPos = finalPos;
-        addAction(action);
-        qCInfo(mainWindowCategory) << "Ação adicionada para Undo/Redo. Tamanho da pilha de undo:" << undoStack.size();
+        // Adicionar ação para Undo/Redo apenas se addToUndoStack for true
+        if (addToUndoStack) {
+            Action action;
+            action.type = Action::ADD;
+            action.entity = m_selectedEntity;
+            action.tileIndex = m_selectedTileIndex;
+            action.newPos = finalPos;
+            addAction(action);
+            qCInfo(mainWindowCategory) << "Ação adicionada para Undo/Redo. Tamanho da pilha de undo:" << undoStack.size();
+        }
 
         updateGrid();
         qCInfo(mainWindowCategory) << "Grade atualizada";
@@ -1329,8 +1331,10 @@ bool MainWindow::undo()
                 break;
             case Action::REMOVE:
                 {
-                    QGraphicsPixmapItem* newItem = placeEntityInScene(action.oldPos);
+                    QGraphicsPixmapItem* newItem = placeEntityInScene(action.oldPos, false);
                     if (newItem) {
+                        m_entityPlacements[newItem] = {action.entity, action.tileIndex};
+                        actionPerformed = true;
                         qCInfo(mainWindowCategory) << "Entidade restaurada na cena na posição:" << action.oldPos;
                     }
                 }
