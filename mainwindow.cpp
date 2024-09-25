@@ -23,6 +23,7 @@
 #include <QScrollArea>
 #include <QAction>
 #include <QEnterEvent>
+#include <QMap>
 
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
@@ -342,6 +343,7 @@ void MainWindow::setupTileList()
 void MainWindow::activateBrushTool()
 {
     m_currentTool = BrushTool;
+    updatePaintingMode();
     m_sceneView->setDragMode(QGraphicsView::NoDrag);
     m_sceneView->setCursor(Qt::CrossCursor);
     if (m_previewItem) {
@@ -408,6 +410,7 @@ void MainWindow::createActions()
 void MainWindow::activateSelectTool()
 {
     m_currentTool = SelectTool;
+    updatePaintingMode();
     m_sceneView->setDragMode(QGraphicsView::RubberBandDrag);
     m_sceneView->setCursor(Qt::ArrowCursor);
     if (m_previewItem) {
@@ -860,6 +863,7 @@ void MainWindow::clearPreview()
 void MainWindow::paintWithBrush(const QPointF &pos)
 {
     if (!m_selectedEntity || !m_previewItem) {
+        qCInfo(mainWindowCategory) << "paintWithBrush: Nenhuma entidade selecionada ou sem preview";
         return;
     }
 
@@ -871,25 +875,42 @@ void MainWindow::paintWithBrush(const QPointF &pos)
         }
     }
 
-    qreal gridX = qRound(pos.x() / entitySize.width()) * entitySize.width();
-    qreal gridY = qRound(pos.y() / entitySize.height()) * entitySize.height();
-    QPointF gridPos(gridX, gridY);
+    QPointF finalPos = pos;
+    QPair<int, int> gridPos;
 
-    // Verificar se já existe uma entidade nesta posição
-    for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-        if (it.key()->pos() == gridPos) {
-            qCInfo(mainWindowCategory) << "Entidade já existe na posição:" << gridPos;
-            return; // Já existe uma entidade nesta posição, não faça nada
-        }
+    if (m_shiftPressed) {
+        int gridX = qRound(pos.x() / entitySize.width());
+        int gridY = qRound(pos.y() / entitySize.height());
+        gridPos = qMakePair(gridX, gridY);
+        finalPos = QPointF(gridX * entitySize.width(), gridY * entitySize.height());
+    } else {
+        // Quando Shift não está pressionado, usamos a posição exata do mouse
+        gridPos = qMakePair(qRound(pos.x()), qRound(pos.y()));
     }
 
-    // Se não houver entidade, coloque uma nova
-    QGraphicsPixmapItem* newItem = placeEntityInScene(gridPos);
-    
-    if (newItem) {
-        qCInfo(mainWindowCategory) << "Nova entidade adicionada na posição:" << gridPos;
+    qCInfo(mainWindowCategory) << "paintWithBrush: Tentando colocar entidade em" << finalPos << "Modo de pintura:" << m_paintingMode;
+
+    bool canPlace = true;
+
+    // Verificar se já existe uma entidade nesta posição apenas se estivermos no modo de pintura
+    if (m_paintingMode && m_occupiedPositions.contains(gridPos)) {
+        qCInfo(mainWindowCategory) << "Entidade já existe na posição:" << finalPos << "(Modo de pintura)";
+        canPlace = false;
+    }
+
+    if (canPlace) {
+        QGraphicsPixmapItem* newItem = placeEntityInScene(finalPos);
+        
+        if (newItem) {
+            qCInfo(mainWindowCategory) << "Nova entidade adicionada na posição:" << newItem->pos();
+            if (m_paintingMode) {
+                m_occupiedPositions.insert(gridPos, true);
+            }
+        } else {
+            qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << finalPos;
+        }
     } else {
-        qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << gridPos;
+        qCInfo(mainWindowCategory) << "Não foi possível colocar a entidade na posição:" << finalPos;
     }
 }
 
@@ -947,10 +968,9 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                 if (mouseEvent->buttons() & Qt::LeftButton) {
                     if (m_ctrlPressed) {
                         eraseEntity();
-                    } else if (m_shiftPressed) {
+                    } else if (m_paintingMode) {
                         paintWithBrush(scenePos);
                     }
-                    // Não colocamos entidades durante o movimento do mouse sem o Shift
                 }
             } else if (m_currentTool == SelectTool) {
                 updateCursor(scenePos);
@@ -963,25 +983,15 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                 if (m_currentTool == BrushTool) {
                     if (m_ctrlPressed) {
                         eraseEntity();
-                    } else if (m_shiftPressed) {
-                        paintWithBrush(scenePos);
                     } else {
-                        // Colocar uma única entidade quando não estiver com Shift
-                        placeEntityInScene(scenePos);
+                        paintWithBrush(scenePos);
                     }
                     return true;
                 } else if (m_currentTool == SelectTool) {
                     // Lógica para selecionar entidades (mantenha o código existente)
-                    QGraphicsItem *item = m_scene->itemAt(scenePos, QTransform());
-                    if (item) {
-                        item->setSelected(!item->isSelected());  // Toggle selection
-                    } else {
-                        m_scene->clearSelection();
-                    }
-                    return true;
                 }
             }
-        }
+        } 
     } else if (watched == m_spritesheetLabel && event->type() == QEvent::MouseButtonPress) {
         QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
         if (mouseEvent->button() == Qt::LeftButton) {
@@ -1037,11 +1047,25 @@ void MainWindow::updateCursor(const QPointF& scenePos)
 void MainWindow::updateShiftState(bool pressed)
 {
     m_shiftPressed = pressed;
+    if (!pressed) {
+        m_occupiedPositions.clear();
+        qCInfo(mainWindowCategory) << "Posições ocupadas resetadas";
+    }
     updateGrid();
+    updatePaintingMode();
     if (m_previewItem) {
         updatePreviewPosition(m_lastCursorPosition);
     }
     qCInfo(mainWindowCategory) << "Estado do Shift atualizado:" << (pressed ? "pressionado" : "liberado");
+}
+
+void MainWindow::updatePaintingMode()
+{
+    bool oldPaintingMode = m_paintingMode;
+    m_paintingMode = (m_currentTool == BrushTool) && m_shiftPressed;
+    if (oldPaintingMode != m_paintingMode) {
+        qCInfo(mainWindowCategory) << "Modo de pintura alterado:" << (m_paintingMode ? "ativado" : "desativado");
+    }
 }
 
 void MainWindow::onSceneViewMousePress(QMouseEvent *event)
@@ -1092,13 +1116,6 @@ QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos)
         item->setFlag(QGraphicsItem::ItemIsMovable);
         item->setFlag(QGraphicsItem::ItemIsSelectable);
 
-        // Verificar se o item foi adicionado corretamente
-        if (!m_scene->items().contains(item)) {
-            qCWarning(mainWindowCategory) << "Item não foi adicionado à cena corretamente";
-            delete item;
-            return nullptr;
-        }
-
         EntityPlacement placement;
         placement.entity = m_selectedEntity;
         placement.tileIndex = m_selectedTileIndex;
@@ -1124,10 +1141,6 @@ QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos)
 
         qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos << "com tamanho:" << entitySize;
         logToFile("Entidade colocada na cena: " + m_selectedEntity->getName());
-        
-        // Manter o foco na lista de tiles
-        m_tileList->setFocus();
-        qCInfo(mainWindowCategory) << "Foco definido para a lista de tiles";
 
         qCInfo(mainWindowCategory) << "Método placeEntityInScene concluído com sucesso";
 

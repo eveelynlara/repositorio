@@ -34,6 +34,7 @@ public:
     };
 
 private:
+    QMap<QPair<int, int>, bool> m_occupiedPositions;
     QAction *m_selectAction;
     QAction *m_brushAction;
     QAction *undoAction;
@@ -119,12 +120,14 @@ private:
     void recoverSceneState();
     void enterEvent(QEvent *event);
     void checkStackConsistency();
+    void updatePaintingMode();
     
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
 
     bool undo();
     bool redo();
+    bool m_paintingMode = false;
     void addAction(const Action& action);
     QPixmap createEntityPixmap(const QSizeF &size);
 
