@@ -72,7 +72,6 @@ private:
     struct Action {
         enum Type { ADD, REMOVE, MOVE };
         Type type;
-        QGraphicsPixmapItem* item;
         QPointF oldPos;
         QPointF newPos;
         Entity* entity;
