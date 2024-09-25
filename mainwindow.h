@@ -32,9 +32,14 @@ public:
         MoveTool,
         BrushTool
     };
-    QGraphicsPixmapItem* placeEntityInScene(const QPointF &pos, bool addToUndoStack = true);
+    QGraphicsPixmapItem* placeEntityInScene(const QPointF &pos, bool addToUndoStack = true, Entity* entity = nullptr, int tileIndex = -1, bool updatePreview = true);
 
 private:
+    QPixmap m_preservedPreviewPixmap;
+    Entity* m_preservedPreviewEntity;
+    int m_preservedPreviewTileIndex;
+    Entity* m_previewEntity;
+    int m_previewTileIndex;
     QMap<QPair<int, int>, bool> m_occupiedPositions;
     QAction *m_selectAction;
     QAction *m_brushAction;
@@ -76,10 +81,12 @@ private:
     struct Action {
         enum Type { ADD, REMOVE, MOVE };
         Type type;
+        Entity* entity;
+        int m_previewTileIndex;
+        int tileIndex;
         QPointF oldPos;
         QPointF newPos;
-        Entity* entity;
-        int tileIndex;
+        QString entityName;  // Adicione isso
     };
 
     QStack<Action> undoStack;
@@ -121,6 +128,8 @@ private:
     void enterEvent(QEvent *event);
     void checkStackConsistency();
     void updatePaintingMode();
+    void preserveCurrentPreview();
+    void restorePreservedPreview();    
     
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
@@ -129,7 +138,7 @@ private:
     bool redo();
     bool m_paintingMode = false;
     void addAction(const Action& action);
-    QPixmap createEntityPixmap(const QSizeF &size);
+    QPixmap createEntityPixmap(const QSizeF &size, Entity* entity = nullptr, int tileIndex = -1);
 
 protected:
     void wheelEvent(QWheelEvent *event) override;
