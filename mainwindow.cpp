@@ -146,6 +146,19 @@ void MainWindow::setupUI()
     QAction* exportAction = new QAction("Exportar Cena", this);
     connect(exportAction, &QAction::triggered, this, &MainWindow::exportScene);
 
+    undoAction = new QAction("Undo", this);
+    undoAction->setShortcut(QKeySequence::Undo);
+    connect(undoAction, &QAction::triggered, this, &MainWindow::undo);
+
+    redoAction = new QAction("Redo", this);
+    redoAction->setShortcut(QKeySequence::Redo);
+    connect(redoAction, &QAction::triggered, this, &MainWindow::redo);
+
+    // Adicione as ações a um menu, se desejar
+    QMenu *editMenu = menuBar()->addMenu(tr("&Edit"));
+    editMenu->addAction(undoAction);
+    editMenu->addAction(redoAction);
+
     QMenu* fileMenu = this->menuBar()->addMenu("Arquivo");
 
     fileMenu->addAction(exportAction);
@@ -574,6 +587,12 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
                 updatePreviewPosition(m_lastCursorPosition);
             }
         }
+    } else if (event->matches(QKeySequence::Undo)) {
+        undo();
+        event->accept();
+    } else if (event->matches(QKeySequence::Redo)) {
+        redo();
+        event->accept();
     } else {
         QMainWindow::keyPressEvent(event);
     }
@@ -879,13 +898,6 @@ void MainWindow::paintWithBrush(const QPointF &pos)
     QGraphicsPixmapItem* newItem = placeEntityInScene(gridPos);
     
     if (newItem) {
-        // Adicionar ação para Undo/Redo
-        Action action;
-        action.type = Action::ADD;
-        action.entity = m_selectedEntity;
-        action.tileIndex = m_selectedTileIndex;
-        action.newPos = gridPos;
-        addAction(action);
         qCInfo(mainWindowCategory) << "Nova entidade adicionada na posição:" << gridPos;
     } else {
         qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << gridPos;
@@ -1280,11 +1292,11 @@ void MainWindow::handleException(const QString &context, const std::exception &e
     QMessageBox::critical(this, "Erro", errorMessage);
 }
 
-void MainWindow::undo()
+bool MainWindow::undo()
 {
     if (undoStack.isEmpty()) {
         qCInfo(mainWindowCategory) << "Pilha de undo está vazia";
-        return;
+        return false;
     }
 
     try {
@@ -1292,11 +1304,10 @@ void MainWindow::undo()
         
         if (!action.entity) {
             qCWarning(mainWindowCategory) << "Ação inválida encontrada na pilha de undo";
-            return;
+            return false;
         }
 
-        qCInfo(mainWindowCategory) << "Tentando desfazer ação do tipo:" << action.type 
-                                   << "na posição:" << action.newPos;
+        bool actionPerformed = false;
 
         switch (action.type) {
             case Action::ADD:
@@ -1307,6 +1318,7 @@ void MainWindow::undo()
                             m_scene->removeItem(item);
                             m_entityPlacements.erase(it);
                             delete item;
+                            actionPerformed = true;
                             qCInfo(mainWindowCategory) << "Entidade removida da cena na posição:" << action.newPos;
                             break;
                         }
@@ -1334,33 +1346,43 @@ void MainWindow::undo()
                 break;
         }
 
-        redoStack.push(action);
-        updateGrid();
-        update(); // Força uma atualização visual da janela principal
-        qCInfo(mainWindowCategory) << "Undo realizado com sucesso para ação do tipo:" << action.type 
-                                   << ". Tamanho da pilha de undo:" << undoStack.size()
-                                   << ". Tamanho da pilha de redo:" << redoStack.size();
+
+        if (actionPerformed) {
+            redoStack.push(action);
+            updateGrid();
+            update();
+            qCInfo(mainWindowCategory) << "Undo realizado com sucesso para ação do tipo:" << action.type 
+                                       << ". Tamanho da pilha de undo:" << undoStack.size()
+                                       << ". Tamanho da pilha de redo:" << redoStack.size();
+        }
+
+        return actionPerformed;
+
     } catch (const std::exception& e) {
         qCCritical(mainWindowCategory) << "Erro durante a operação de desfazer:" << e.what();
     } catch (...) {
         qCCritical(mainWindowCategory) << "Erro desconhecido durante a operação de desfazer";
     }
+
+    return false;
 }
 
-void MainWindow::redo()
+bool MainWindow::redo()
 {
     if (redoStack.isEmpty()) {
-        qDebug() << "Pilha de redo está vazia";
-        return;
+        qCInfo(mainWindowCategory) << "Pilha de redo está vazia";
+        return false;
     }
 
     try {
         Action action = redoStack.pop();
         
         if (!action.entity) {
-            qWarning() << "Ação inválida encontrada na pilha de redo";
-            return;
+            qCWarning(mainWindowCategory) << "Ação inválida encontrada na pilha de redo";
+            return false;
         }
+
+        bool actionPerformed = false;
 
         switch (action.type) {
             case Action::ADD:
@@ -1368,6 +1390,8 @@ void MainWindow::redo()
                     QGraphicsPixmapItem* newItem = m_scene->addPixmap(createEntityPixmap(action.entity->getCurrentSize()));
                     newItem->setPos(action.newPos);
                     m_entityPlacements[newItem] = {action.entity, action.tileIndex};
+                    actionPerformed = true;
+                    qCInfo(mainWindowCategory) << "Entidade adicionada na cena na posição:" << action.newPos;
                 }
                 break;
             case Action::REMOVE:
@@ -1383,6 +1407,8 @@ void MainWindow::redo()
                         m_scene->removeItem(itemToRemove);
                         m_entityPlacements.remove(itemToRemove);
                         delete itemToRemove;
+                        actionPerformed = true;
+                        qCInfo(mainWindowCategory) << "Entidade removida da cena na posição:" << action.oldPos;
                     }
                 }
                 break;
@@ -1391,6 +1417,8 @@ void MainWindow::redo()
                     for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
                         if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
                             it.key()->setPos(action.newPos);
+                            actionPerformed = true;
+                            qCInfo(mainWindowCategory) << "Entidade movida na cena da posição:" << action.oldPos << "para:" << action.newPos;
                             break;
                         }
                     }
@@ -1398,14 +1426,24 @@ void MainWindow::redo()
                 break;
         }
 
-        undoStack.push(action);
-        updateGrid();
-        qDebug() << "Redo realizado com sucesso";
+        if (actionPerformed) {
+            undoStack.push(action);
+            updateGrid();
+            update(); // Força uma atualização visual da janela principal
+            qCInfo(mainWindowCategory) << "Redo realizado com sucesso para ação do tipo:" << action.type 
+                                       << ". Tamanho da pilha de undo:" << undoStack.size()
+                                       << ". Tamanho da pilha de redo:" << redoStack.size();
+        }
+
+        return actionPerformed;
+
     } catch (const std::exception& e) {
-        qCritical() << "Erro durante a operação de refazer:" << e.what();
+        qCCritical(mainWindowCategory) << "Erro durante a operação de refazer:" << e.what();
     } catch (...) {
-        qCritical() << "Erro desconhecido durante a operação de refazer";
+        qCCritical(mainWindowCategory) << "Erro desconhecido durante a operação de refazer";
     }
+
+    return false;
 }
 
 void MainWindow::addAction(const Action& action)

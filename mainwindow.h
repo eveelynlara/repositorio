@@ -36,6 +36,8 @@ public:
 private:
     QAction *m_selectAction;
     QAction *m_brushAction;
+    QAction *undoAction;
+    QAction *redoAction;
     Ui::MainWindow *ui;
     QGraphicsScene *m_scene;
     QGraphicsView *m_sceneView;
@@ -122,8 +124,8 @@ private:
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
 
-    void undo();
-    void redo();
+    bool undo();
+    bool redo();
     void addAction(const Action& action);
     QPixmap createEntityPixmap(const QSizeF &size);
 
