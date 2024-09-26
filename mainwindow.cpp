@@ -454,9 +454,8 @@ void MainWindow::activateSelectTool()
     updatePaintingMode();
     m_sceneView->setDragMode(QGraphicsView::RubberBandDrag);
     m_sceneView->setCursor(Qt::ArrowCursor);
-    if (m_previewItem) {
-        m_previewItem->hide();
-    }
+    clearPreview(); // Limpa qualquer preview existente
+    updateToolbarState();
     qCInfo(mainWindowCategory) << "Ferramenta de seleção ativada";
 }
 
@@ -590,9 +589,15 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
     } else if (event->matches(QKeySequence::Redo)) {
         redo();
         event->accept();
+    } else if (event->key() == Qt::Key_Control || event->key() == Qt::Key_Meta) {
+        m_ctrlPressed = true;
+        if (m_currentTool == BrushTool) {
+            updatePreviewPosition(m_lastCursorPosition);
+        }
     } else {
         QMainWindow::keyPressEvent(event);
     }
+    clearPreviewIfNotBrushTool();
 }
 
 void MainWindow::ensureBrushToolActive()
@@ -609,8 +614,14 @@ void MainWindow::keyReleaseEvent(QKeyEvent *event)
     if (event->key() == Qt::Key_Shift) {
         m_shiftPressed = false;
         updateGrid();
+    } else if (event->key() == Qt::Key_Control || event->key() == Qt::Key_Meta) {
+        m_ctrlPressed = false;
+        if (m_currentTool == BrushTool) {
+            updatePreviewPosition(m_lastCursorPosition);
+        }
     }
     QMainWindow::keyReleaseEvent(event);
+    clearPreviewIfNotBrushTool();
 }
 
 void MainWindow::onTileItemClicked(QListWidgetItem *item)
@@ -878,6 +889,11 @@ void MainWindow::clearCurrentScene()
 
 void MainWindow::updatePreviewPosition(const QPointF& scenePos)
 {
+    if (m_currentTool != BrushTool) {
+        clearPreview();
+        return;
+    }
+
     m_lastCursorPosition = scenePos;
     if (!m_selectedEntity || !m_previewItem) {
         if (m_selectedEntity && !m_previewItem) {
@@ -927,6 +943,13 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
     qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos 
                                << "Shift:" << m_shiftPressed 
                                << "Ctrl:" << m_ctrlPressed;
+}
+
+void MainWindow::clearPreviewIfNotBrushTool()
+{
+    if (m_currentTool != BrushTool) {
+        clearPreview();
+    }
 }
 
 void MainWindow::recoverSceneState()

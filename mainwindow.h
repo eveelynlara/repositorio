@@ -72,6 +72,7 @@ private:
 
     void logToFile(const QString& message);
     void cleanupResources();
+    void clearPreviewIfNotBrushTool();
 
     // Adicione esta variável de membro
     int updateCount;
