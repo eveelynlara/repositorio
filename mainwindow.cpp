@@ -101,25 +101,18 @@ void MainWindow::eraseEntity()
 {
     if (!m_previewItem) return;
 
-    QRectF eraseRect = m_previewItem->sceneBoundingRect();
-    QList<QGraphicsItem*> itemsInRect = m_scene->items(eraseRect, Qt::IntersectsItemShape);
+    QPointF eraseCenter = m_previewItem->scenePos() + QPointF(16, 16); // Centro do preview
+    QRectF eraseRect(eraseCenter - QPointF(16, 16), QSizeF(32, 32)); // Área fixa de 32x32
+
+    QList<QGraphicsItem*> itemsAtPoint = m_scene->items(eraseCenter);
     
     QGraphicsPixmapItem* itemToErase = nullptr;
-    qreal maxOverlap = 0;
 
-    for (QGraphicsItem* item : itemsInRect) {
+    for (QGraphicsItem* item : itemsAtPoint) {
         QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
         if (pixmapItem && m_entityPlacements.contains(pixmapItem) && pixmapItem != m_previewItem) {
-            QRectF intersection = eraseRect.intersected(pixmapItem->sceneBoundingRect());
-            qreal overlap = intersection.width() * intersection.height();
-            qreal entityArea = pixmapItem->sceneBoundingRect().width() * pixmapItem->sceneBoundingRect().height();
-            qreal overlapRatio = overlap / entityArea;
-
-            // Só considere entidades com pelo menos 25% de sobreposição
-            if (overlapRatio > 0.25 && overlap > maxOverlap) {
-                maxOverlap = overlap;
-                itemToErase = pixmapItem;
-            }
+            itemToErase = pixmapItem;
+            break;
         }
     }
 
@@ -138,8 +131,11 @@ void MainWindow::eraseEntity()
         qCInfo(mainWindowCategory) << "Entidade removida e ação adicionada à pilha de undo:" 
                                    << action.entityName << "na posição:" << action.oldPos;
     } else {
-        qCInfo(mainWindowCategory) << "Nenhuma entidade para apagar na posição do preview:" << eraseRect;
+        qCInfo(mainWindowCategory) << "Nenhuma entidade para apagar na posição do preview:" << eraseCenter;
     }
+
+    // Atualizar a visualização da grade após apagar
+    updateGrid();
 }
 
 void MainWindow::logToFile(const QString& message)
