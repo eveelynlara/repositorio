@@ -99,27 +99,46 @@ MainWindow::~MainWindow()
 
 void MainWindow::eraseEntity()
 {
+    if (!m_previewItem) return;
+
     QRectF eraseRect = m_previewItem->sceneBoundingRect();
-    QList<QGraphicsItem*> itemsInRect = m_scene->items(eraseRect);
+    QList<QGraphicsItem*> itemsInRect = m_scene->items(eraseRect, Qt::IntersectsItemShape);
     
+    QGraphicsPixmapItem* itemToErase = nullptr;
+    qreal maxOverlap = 0;
+
     for (QGraphicsItem* item : itemsInRect) {
         QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
         if (pixmapItem && m_entityPlacements.contains(pixmapItem) && pixmapItem != m_previewItem) {
-            Action action;
-            action.type = Action::REMOVE;
-            action.entity = m_entityPlacements[pixmapItem].entity;
-            action.tileIndex = m_entityPlacements[pixmapItem].tileIndex;
-            action.oldPos = pixmapItem->pos();
-            action.entityName = action.entity->getName();
-            addAction(action);  // Use a função addAction em vez de push diretamente
+            QRectF intersection = eraseRect.intersected(pixmapItem->sceneBoundingRect());
+            qreal overlap = intersection.width() * intersection.height();
+            qreal entityArea = pixmapItem->sceneBoundingRect().width() * pixmapItem->sceneBoundingRect().height();
+            qreal overlapRatio = overlap / entityArea;
 
-            m_scene->removeItem(pixmapItem);
-            m_entityPlacements.remove(pixmapItem);
-            delete pixmapItem;
-            qCInfo(mainWindowCategory) << "Entidade removida e ação adicionada à pilha de undo:" 
-                                       << action.entityName << "na posição:" << action.oldPos;
-            break;
+            // Só considere entidades com pelo menos 25% de sobreposição
+            if (overlapRatio > 0.25 && overlap > maxOverlap) {
+                maxOverlap = overlap;
+                itemToErase = pixmapItem;
+            }
         }
+    }
+
+    if (itemToErase) {
+        Action action;
+        action.type = Action::REMOVE;
+        action.entity = m_entityPlacements[itemToErase].entity;
+        action.tileIndex = m_entityPlacements[itemToErase].tileIndex;
+        action.oldPos = itemToErase->pos();
+        action.entityName = action.entity->getName();
+        addAction(action);
+
+        m_scene->removeItem(itemToErase);
+        m_entityPlacements.remove(itemToErase);
+        delete itemToErase;
+        qCInfo(mainWindowCategory) << "Entidade removida e ação adicionada à pilha de undo:" 
+                                   << action.entityName << "na posição:" << action.oldPos;
+    } else {
+        qCInfo(mainWindowCategory) << "Nenhuma entidade para apagar na posição do preview:" << eraseRect;
     }
 }
 
@@ -715,7 +734,6 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
 {
     m_lastCursorPosition = scenePos;
     if (!m_selectedEntity || !m_previewItem) {
-        // Em vez de apenas logar, tente recriar o preview se necessário
         if (m_selectedEntity && !m_previewItem) {
             updateEntityPreview();
         }
@@ -739,8 +757,17 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
         adjustedPos = QPointF(gridX, gridY);
     }
     m_previewItem->setPos(adjustedPos);
-    m_previewItem->show();
-    //qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos << "Shift:" << m_shiftPressed << "TileIndex:" << m_selectedTileIndex;
+
+    if (m_ctrlPressed) {
+        m_previewItem->show();
+        m_previewItem->setOpacity(0.7);  // Mais visível no modo de apagar
+    } else {
+        m_previewItem->setOpacity(0.5);  // Opacidade normal
+    }
+
+    qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos 
+                               << "Shift:" << m_shiftPressed 
+                               << "Ctrl:" << m_ctrlPressed;
 }
 
 void MainWindow::recoverSceneState()
@@ -931,7 +958,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             return true;
         } else if (keyEvent->key() == Qt::Key_Control || keyEvent->key() == Qt::Key_Meta) {
             m_ctrlPressed = (event->type() == QEvent::KeyPress);
-            updateCursor(m_lastCursorPosition);
+            updatePreviewPosition(m_lastCursorPosition);
             return true;
         } else if (event->type() == QEvent::KeyPress && 
                    (keyEvent->key() == Qt::Key_Up || keyEvent->key() == Qt::Key_Down) && 

@@ -36,6 +36,7 @@ public:
 
 private:
     QPixmap m_preservedPreviewPixmap;
+    QPixmap createErasePreviewPixmap();
     Entity* m_preservedPreviewEntity;
     int m_preservedPreviewTileIndex;
     Entity* m_previewEntity;
@@ -129,7 +130,7 @@ private:
     void checkStackConsistency();
     void updatePaintingMode();
     void preserveCurrentPreview();
-    void restorePreservedPreview();    
+    void restorePreservedPreview();
     
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
