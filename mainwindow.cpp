@@ -413,6 +413,10 @@ void MainWindow::createActions()
         }
     });
 
+    // Ação para importar a cena
+    QAction *importAction = new QAction("Import Scene", this);
+    connect(importAction, &QAction::triggered, this, &MainWindow::importScene);
+
     // Ação para exportar a cena
     QAction *exportAction = new QAction("Export Scene", this);
     connect(exportAction, &QAction::triggered, this, &MainWindow::exportScene);
@@ -420,6 +424,7 @@ void MainWindow::createActions()
     // Criar o menu File
     QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction(openProjectAction);
+    fileMenu->addAction(importAction);
     fileMenu->addAction(exportAction);
 
     // Criar o menu Edit
@@ -728,6 +733,132 @@ void MainWindow::onEntityItemClicked(QListWidgetItem *item)
     } catch (const std::exception& e) {
         handleException("Erro ao selecionar entidade", e);
     }
+}
+
+void MainWindow::importScene()
+{
+    QString fileName = QFileDialog::getOpenFileName(this, tr("Importar Cena"), "", tr("Arquivos de Cena (*.esc);;Todos os Arquivos (*)"));
+    if (fileName.isEmpty())
+        return;
+
+    QFile file(fileName);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("Erro"), tr("Não foi possível abrir o arquivo para leitura."));
+        return;
+    }
+
+    clearCurrentScene();
+
+    QXmlStreamReader xml(&file);
+
+    while (!xml.atEnd() && !xml.hasError()) {
+        QXmlStreamReader::TokenType token = xml.readNext();
+
+        if (token == QXmlStreamReader::StartElement) {
+            if (xml.name().compare(QLatin1String("Entity")) == 0) {
+                QString entityName;
+                QPointF position;
+                int spriteFrame = 0;
+
+                QXmlStreamAttributes attributes = xml.attributes();
+                if (attributes.hasAttribute(QLatin1String("spriteFrame"))) {
+                    spriteFrame = attributes.value(QLatin1String("spriteFrame")).toInt();
+                }
+
+                while (!(xml.tokenType() == QXmlStreamReader::EndElement && 
+                         xml.name().compare(QLatin1String("Entity")) == 0)) {
+                    xml.readNext();
+
+                    if (xml.tokenType() == QXmlStreamReader::StartElement) {
+                        if (xml.name().compare(QLatin1String("EntityName")) == 0) {
+                            entityName = xml.readElementText().replace(QLatin1String(".ent"), QString());
+                        } else if (xml.name().compare(QLatin1String("Position")) == 0) {
+                            QXmlStreamAttributes posAttributes = xml.attributes();
+                            qreal x = posAttributes.value(QLatin1String("x")).toDouble();
+                            qreal y = posAttributes.value(QLatin1String("y")).toDouble();
+                            position = QPointF(x, y);
+                        }
+                    }
+                }
+
+                Entity* entity = m_entityManager->getEntityByName(entityName);
+                if (entity) {
+                    QSizeF entitySize = entity->getCurrentSize();
+                    if (entitySize.isEmpty()) {
+                        entitySize = entity->getCollisionSize();
+                        if (entitySize.isEmpty()) {
+                            entitySize = QSizeF(32, 32);
+                        }
+                    }
+                    QPointF correctedPos = position - QPointF(entitySize.width() / 2, entitySize.height() / 2);
+                    
+                    // Verificar se o spriteFrame é válido
+                    if (spriteFrame < 0 || spriteFrame >= entity->getSpriteDefinitions().size()) {
+                        spriteFrame = 0;
+                    }
+                    
+                    // Usar uma função separada para colocar a entidade na cena
+                    placeImportedEntityInScene(correctedPos, entity, spriteFrame);
+                } else {
+                    qCWarning(mainWindowCategory) << "Entidade não encontrada:" << entityName;
+                }
+            }
+        }
+    }
+
+    if (xml.hasError()) {
+        QMessageBox::warning(this, tr("Erro de XML"), tr("Erro ao ler o arquivo XML: %1").arg(xml.errorString()));
+    }
+
+    file.close();
+    updateGrid();
+    QMessageBox::information(this, tr("Sucesso"), tr("Cena importada com sucesso."));
+}
+
+void MainWindow::placeImportedEntityInScene(const QPointF &pos, Entity* entity, int tileIndex)
+{
+    if (!entity) {
+        qCWarning(mainWindowCategory) << "Tentativa de colocar entidade nula na cena";
+        return;
+    }
+
+    QSizeF entitySize = entity->getCurrentSize();
+    if (entitySize.isEmpty()) {
+        entitySize = entity->getCollisionSize();
+        if (entitySize.isEmpty()) {
+            entitySize = QSizeF(32, 32);
+        }
+    }
+
+    QPixmap tilePixmap = createEntityPixmap(entitySize, entity, tileIndex);
+    QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
+    if (!item) {
+        qCWarning(mainWindowCategory) << "Falha ao adicionar item à cena";
+        return;
+    }
+    item->setPos(pos);
+    item->setFlag(QGraphicsItem::ItemIsMovable);
+    item->setFlag(QGraphicsItem::ItemIsSelectable);
+
+    EntityPlacement placement;
+    placement.entity = entity;
+    placement.tileIndex = tileIndex;
+    m_entityPlacements[item] = placement;
+
+    qCInfo(mainWindowCategory) << "Entidade importada colocada na cena:" << entity->getName() 
+                               << "na posição:" << pos 
+                               << "com tile index:" << tileIndex;
+}
+
+void MainWindow::clearCurrentScene()
+{
+    for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
+        m_scene->removeItem(it.key());
+        delete it.key();
+    }
+    m_entityPlacements.clear();
+    undoStack.clear();
+    redoStack.clear();
 }
 
 void MainWindow::updatePreviewPosition(const QPointF& scenePos)
@@ -1208,42 +1339,51 @@ void MainWindow::updatePreviewIfNeeded()
     }
 }
 
-QPixmap MainWindow::createEntityPixmap(const QSizeF &size, [[maybe_unused]] Entity* entity, [[maybe_unused]] int tileIndex)
+QPixmap MainWindow::createEntityPixmap(const QSizeF &size, Entity* entity, int tileIndex)
 {
     QPixmap pixmap(size.toSize());
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
 
-    qCInfo(mainWindowCategory) << "Criando pixmap com tamanho:" << size << "e tile index:" << m_selectedTileIndex;
+    qCInfo(mainWindowCategory) << "Criando pixmap com tamanho:" << size << "e tile index:" << tileIndex;
 
-    if (m_selectedEntity->isInvisible()) {
+    if (!entity) {
+        qCWarning(mainWindowCategory) << "Entidade nula passada para createEntityPixmap";
+        return pixmap;
+    }
+
+    if (entity->isInvisible()) {
         painter.setPen(QPen(Qt::red, 2));
         painter.drawRect(pixmap.rect().adjusted(1, 1, -1, -1));
         painter.setFont(QFont("Arial", 8));
-        QString text = m_selectedEntity->getName();
+        QString text = entity->getName();
         QRectF textRect = painter.boundingRect(pixmap.rect(), Qt::AlignCenter, text);
         if (textRect.width() > pixmap.width() - 4) {
             text = painter.fontMetrics().elidedText(text, Qt::ElideRight, pixmap.width() - 4);
         }
         painter.drawText(pixmap.rect(), Qt::AlignCenter, text);
         qCInfo(mainWindowCategory) << "Desenhando entidade invisível";
-    } else if (m_selectedEntity->hasOnlyCollision()) {
+    } else if (entity->hasOnlyCollision()) {
         painter.setPen(QPen(Qt::blue, 2));
         painter.drawRect(pixmap.rect().adjusted(1, 1, -1, -1));
         painter.drawText(pixmap.rect(), Qt::AlignCenter, "Collision");
         qCInfo(mainWindowCategory) << "Desenhando entidade apenas com colisão";
     } else {
-        QPixmap fullPixmap = m_selectedEntity->getPixmap();
-        const QVector<QRectF>& spriteDefinitions = m_selectedEntity->getSpriteDefinitions();
+        QPixmap fullPixmap = entity->getPixmap();
+        const QVector<QRectF>& spriteDefinitions = entity->getSpriteDefinitions();
         
         qCInfo(mainWindowCategory) << "Número de sprites:" << spriteDefinitions.size();
         
-        if (m_selectedTileIndex >= 0 && m_selectedTileIndex < spriteDefinitions.size()) {
-            QRectF spriteRect = spriteDefinitions[m_selectedTileIndex];
+        if (tileIndex >= 0 && tileIndex < spriteDefinitions.size()) {
+            QRectF spriteRect = spriteDefinitions[tileIndex];
             painter.drawPixmap(pixmap.rect(), fullPixmap, spriteRect);
-            qCInfo(mainWindowCategory) << "Desenhando sprite" << m_selectedTileIndex << "na posição" << spriteRect;
+            qCInfo(mainWindowCategory) << "Desenhando sprite" << tileIndex << "na posição" << spriteRect;
         } else {
-            qCWarning(mainWindowCategory) << "Índice de tile inválido:" << m_selectedTileIndex;
+            qCWarning(mainWindowCategory) << "Índice de tile inválido:" << tileIndex << ". Usando o primeiro sprite.";
+            if (!spriteDefinitions.isEmpty()) {
+                QRectF spriteRect = spriteDefinitions[0];
+                painter.drawPixmap(pixmap.rect(), fullPixmap, spriteRect);
+            }
         }
     }
 

@@ -131,6 +131,8 @@ private:
     void updatePaintingMode();
     void preserveCurrentPreview();
     void restorePreservedPreview();
+    void placeImportedEntityInScene(const QPointF &pos, Entity* entity, int tileIndex);
+
     
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
@@ -151,7 +153,11 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void enterEvent(QEnterEvent *event) override;
 
+public slots:
+    void importScene();    
+
 private slots:
+    void clearCurrentScene();
     void onProjectItemDoubleClicked(const QModelIndex &index);
     void onEntityItemClicked(QListWidgetItem *item);
     void onTileItemClicked(QListWidgetItem *item);
