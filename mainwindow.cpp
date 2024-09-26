@@ -432,6 +432,11 @@ void MainWindow::createActions()
     QAction *importAction = new QAction("Import Scene", this);
     connect(importAction, &QAction::triggered, this, &MainWindow::importScene);
 
+    // Ação para salvar a cena
+    QAction *saveAction = new QAction("Save Scene", this);
+    saveAction->setShortcut(QKeySequence::Save);
+    connect(saveAction, &QAction::triggered, this, &MainWindow::saveScene);
+
     // Ação para exportar a cena
     QAction *exportAction = new QAction("Export Scene", this);
     connect(exportAction, &QAction::triggered, this, &MainWindow::exportScene);
@@ -439,6 +444,7 @@ void MainWindow::createActions()
     // Criar o menu File
     QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction(openProjectAction);
+    fileMenu->addAction(saveAction); 
     fileMenu->addAction(importAction);
     fileMenu->addAction(exportAction);
 
@@ -588,6 +594,9 @@ void MainWindow::keyPressEvent(QKeyEvent *event)
         event->accept();
     } else if (event->matches(QKeySequence::Redo)) {
         redo();
+        event->accept();
+    } else if (event->matches(QKeySequence::Save)) {
+        saveScene();
         event->accept();
     } else if (event->key() == Qt::Key_Control || event->key() == Qt::Key_Meta) {
         m_ctrlPressed = true;
@@ -839,6 +848,9 @@ void MainWindow::importScene()
     file.close();
     updateGrid();
     QMessageBox::information(this, tr("Sucesso"), tr("Cena importada com sucesso."));
+
+    m_currentScenePath = fileName;
+    qCInfo(mainWindowCategory) << "Cena importada de:" << m_currentScenePath;    
 }
 
 void MainWindow::placeImportedEntityInScene(const QPointF &pos, Entity* entity, int tileIndex)
@@ -1771,6 +1783,108 @@ void MainWindow::saveCrashReport()
         out << "Estado do Shift: " << (m_shiftPressed ? "Pressionado" : "Liberado") << "\n";
         // Adicione mais informações relevantes
     }
+}
+
+void MainWindow::saveScene()
+{
+    if (m_currentScenePath.isEmpty()) {
+        QString fileName = QFileDialog::getSaveFileName(this, tr("Salvar Cena"), 
+                                                        m_projectPath, 
+                                                        tr("Arquivos de Cena (*.esc)"));
+        if (fileName.isEmpty())
+            return;
+        
+        if (!fileName.endsWith(".esc")) {
+            fileName += ".esc";
+        }
+        
+        m_currentScenePath = fileName;
+    }
+
+    QFile file(m_currentScenePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, tr("Erro"), tr("Não foi possível abrir o arquivo para escrita."));
+        return;
+    }
+
+    QXmlStreamWriter xml(&file);
+    xml.setAutoFormatting(true);
+    xml.writeStartDocument();
+
+    xml.writeStartElement("Ethanon");
+
+    // Escrever propriedades da cena
+    xml.writeStartElement("SceneProperties");
+    xml.writeAttribute("lightIntensity", "2");
+    xml.writeAttribute("parallaxIntensity", "0");
+
+    xml.writeStartElement("Ambient");
+    xml.writeAttribute("r", "1");
+    xml.writeAttribute("g", "1");
+    xml.writeAttribute("b", "1");
+    xml.writeEndElement(); // Ambient
+
+    xml.writeStartElement("ZAxisDirection");
+    xml.writeAttribute("x", "0");
+    xml.writeAttribute("y", "-1");
+    xml.writeEndElement(); // ZAxisDirection
+
+    xml.writeEndElement(); // SceneProperties
+
+    // Escrever entidades na cena
+    xml.writeStartElement("EntitiesInScene");
+
+    int entityId = 1;
+    for (const auto& item : m_scene->items()) {
+        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
+        if (pixmapItem) {
+            auto it = m_entityPlacements.find(pixmapItem);
+            if (it != m_entityPlacements.end()) {
+                Entity* entity = it->entity;
+                int tileIndex = it->tileIndex;
+
+                xml.writeStartElement("Entity");
+                xml.writeAttribute("id", QString::number(entityId++));
+                xml.writeAttribute("spriteFrame", QString::number(tileIndex));
+
+                xml.writeTextElement("EntityName", entity->getName() + ".ent");
+
+                // Calcular a posição corrigida
+                QSizeF entitySize = entity->getCurrentSize();
+                if (entitySize.isEmpty()) {
+                    entitySize = entity->getCollisionSize();
+                    if (entitySize.isEmpty()) {
+                        entitySize = QSizeF(32, 32);
+                    }
+                }
+                QPointF correctedPos = pixmapItem->pos() + QPointF(entitySize.width() / 2, entitySize.height() / 2);
+
+                xml.writeStartElement("Position");
+                xml.writeAttribute("x", QString::number(static_cast<int>(correctedPos.x())));
+                xml.writeAttribute("y", QString::number(static_cast<int>(correctedPos.y())));
+                xml.writeAttribute("z", "0");
+                xml.writeAttribute("angle", "0");
+                xml.writeEndElement(); // Position
+
+                xml.writeStartElement("Entity");
+                xml.writeTextElement("FileName", entity->getName() + ".ent");
+                xml.writeEndElement(); // Entity
+
+                xml.writeEndElement(); // Entity
+            }
+        }
+    }
+
+    xml.writeEndElement(); // EntitiesInScene
+
+    xml.writeEndElement(); // Ethanon
+
+    xml.writeEndDocument();
+
+    file.close();
+
+    statusBar()->showMessage(tr("Cena salva com sucesso: %1").arg(m_currentScenePath), 3000);
+    qCInfo(mainWindowCategory) << "Cena salva em:" << m_currentScenePath;
 }
 
 void MainWindow::exportScene()

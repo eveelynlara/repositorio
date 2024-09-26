@@ -57,6 +57,7 @@ private:
     QDockWidget *m_propertiesDock;
     QLabel *m_spritesheetLabel;
     QString m_projectPath;
+    QString m_currentScenePath;
     Entity *m_selectedEntity;
     int m_selectedTileIndex;
     QGraphicsPixmapItem *m_previewItem;
@@ -163,6 +164,7 @@ private slots:
     void onTileItemClicked(QListWidgetItem *item);
     void updatePreviewContinuously();
     void exportScene();
+    void saveScene();
     void onSceneViewMousePress(QMouseEvent *event);
     void onSceneViewMouseMove(QMouseEvent *event);
     void updateShiftState(bool pressed);
