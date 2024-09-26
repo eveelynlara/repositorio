@@ -132,7 +132,6 @@ private:
     void preserveCurrentPreview();
     void restorePreservedPreview();
     void placeImportedEntityInScene(const QPointF &pos, Entity* entity, int tileIndex);
-
     
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);

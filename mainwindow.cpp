@@ -101,18 +101,27 @@ void MainWindow::eraseEntity()
 {
     if (!m_previewItem) return;
 
-    QPointF eraseCenter = m_previewItem->scenePos() + QPointF(16, 16); // Centro do preview
-    QRectF eraseRect(eraseCenter - QPointF(16, 16), QSizeF(32, 32)); // Área fixa de 32x32
-
-    QList<QGraphicsItem*> itemsAtPoint = m_scene->items(eraseCenter);
+    QRectF eraseRect = m_previewItem->sceneBoundingRect();
+    QList<QGraphicsItem*> itemsInRect = m_scene->items(eraseRect, Qt::IntersectsItemShape);
     
     QGraphicsPixmapItem* itemToErase = nullptr;
+    qreal maxOverlapRatio = 0;
+    qreal eraseThreshold = 0.25; // 25% da borracha deve sobrepor para apagar
 
-    for (QGraphicsItem* item : itemsAtPoint) {
+    qreal eraseArea = eraseRect.width() * eraseRect.height();
+
+    for (QGraphicsItem* item : itemsInRect) {
         QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
         if (pixmapItem && m_entityPlacements.contains(pixmapItem) && pixmapItem != m_previewItem) {
-            itemToErase = pixmapItem;
-            break;
+            QRectF intersection = eraseRect.intersected(pixmapItem->sceneBoundingRect());
+            qreal overlap = intersection.width() * intersection.height();
+            qreal overlapRatio = overlap / eraseArea;
+
+            // Se 25% da borracha está sobre a entidade, marque para apagar
+            if (overlapRatio > eraseThreshold && overlapRatio > maxOverlapRatio) {
+                maxOverlapRatio = overlapRatio;
+                itemToErase = pixmapItem;
+            }
         }
     }
 
@@ -129,13 +138,23 @@ void MainWindow::eraseEntity()
         m_entityPlacements.remove(itemToErase);
         delete itemToErase;
         qCInfo(mainWindowCategory) << "Entidade removida e ação adicionada à pilha de undo:" 
-                                   << action.entityName << "na posição:" << action.oldPos;
+                                   << action.entityName << "na posição:" << action.oldPos
+                                   << "Sobreposição:" << (maxOverlapRatio * 100) << "%";
     } else {
-        qCInfo(mainWindowCategory) << "Nenhuma entidade para apagar na posição do preview:" << eraseCenter;
+        qCInfo(mainWindowCategory) << "Nenhuma entidade para apagar na posição do preview:" << eraseRect;
     }
+}
 
-    // Atualizar a visualização da grade após apagar
-    updateGrid();
+QPixmap MainWindow::createErasePreviewPixmap()
+{
+    QPixmap pixmap(32, 32);
+    pixmap.fill(Qt::transparent);
+    QPainter painter(&pixmap);
+    painter.setPen(QPen(Qt::red, 2));
+    painter.drawRect(0, 0, 31, 31);
+    painter.drawLine(0, 0, 31, 31);
+    painter.drawLine(0, 31, 31, 0);
+    return pixmap;
 }
 
 void MainWindow::logToFile(const QString& message)
@@ -883,14 +902,27 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
         qreal gridY = qRound(scenePos.y() / entitySize.height()) * entitySize.height();
         adjustedPos = QPointF(gridX, gridY);
     }
-    m_previewItem->setPos(adjustedPos);
 
     if (m_ctrlPressed) {
-        m_previewItem->show();
-        m_previewItem->setOpacity(0.7);  // Mais visível no modo de apagar
+        // Use o pixmap da borracha e ajuste a posição para centralizar
+        m_previewItem->setPixmap(createErasePreviewPixmap());
+        adjustedPos -= QPointF(16, 16);  // Centraliza o preview da borracha
+        m_previewItem->setOpacity(1.0);  // Totalmente visível no modo de apagar
     } else {
+        // Restaure o pixmap original da entidade
+        QSizeF entitySize = m_selectedEntity->getCurrentSize();
+        if (entitySize.isEmpty()) {
+            entitySize = m_selectedEntity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
+            }
+        }
+        m_previewItem->setPixmap(createEntityPixmap(entitySize, m_selectedEntity, m_selectedTileIndex));
         m_previewItem->setOpacity(0.5);  // Opacidade normal
     }
+
+    m_previewItem->setPos(adjustedPos);
+    m_previewItem->show();
 
     qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos 
                                << "Shift:" << m_shiftPressed 
