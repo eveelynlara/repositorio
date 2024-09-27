@@ -165,6 +165,7 @@ private slots:
     void updatePreviewContinuously();
     void exportScene();
     void saveScene();
+    void saveSceneAs();
     void onSceneViewMousePress(QMouseEvent *event);
     void onSceneViewMouseMove(QMouseEvent *event);
     void updateShiftState(bool pressed);

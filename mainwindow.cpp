@@ -437,6 +437,11 @@ void MainWindow::createActions()
     saveAction->setShortcut(QKeySequence::Save);
     connect(saveAction, &QAction::triggered, this, &MainWindow::saveScene);
 
+    // Ação para salvar como
+    QAction *saveAsAction = new QAction("Save As...", this);
+    saveAsAction->setShortcut(QKeySequence::fromString("Ctrl+Shift+S"));
+    connect(saveAsAction, &QAction::triggered, this, &MainWindow::saveSceneAs);
+
     // Ação para exportar a cena
     QAction *exportAction = new QAction("Export Scene", this);
     connect(exportAction, &QAction::triggered, this, &MainWindow::exportScene);
@@ -444,7 +449,8 @@ void MainWindow::createActions()
     // Criar o menu File
     QMenu *fileMenu = menuBar()->addMenu("&File");
     fileMenu->addAction(openProjectAction);
-    fileMenu->addAction(saveAction); 
+    fileMenu->addAction(saveAction);
+    fileMenu->addAction(saveAsAction);
     fileMenu->addAction(importAction);
     fileMenu->addAction(exportAction);
 
@@ -1885,6 +1891,22 @@ void MainWindow::saveScene()
 
     statusBar()->showMessage(tr("Cena salva com sucesso: %1").arg(m_currentScenePath), 3000);
     qCInfo(mainWindowCategory) << "Cena salva em:" << m_currentScenePath;
+}
+
+void MainWindow::saveSceneAs()
+{
+    QString fileName = QFileDialog::getSaveFileName(this, tr("Save Scene As"), 
+                                                    m_projectPath, 
+                                                    tr("Scene Files (*.esc)"));
+    if (fileName.isEmpty())
+        return;
+    
+    if (!fileName.endsWith(".esc")) {
+        fileName += ".esc";
+    }
+    
+    m_currentScenePath = fileName;
+    saveScene(); 
 }
 
 void MainWindow::exportScene()
