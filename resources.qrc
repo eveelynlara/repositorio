@@ -6,5 +6,6 @@
         <file>eyedropper.png</file>
         <file>fill.png</file>
         <file>move.png</file>
+        <file>select.png</file>
     </qresource>
 </RCC>

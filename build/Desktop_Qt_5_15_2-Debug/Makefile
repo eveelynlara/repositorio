@@ -832,6 +832,7 @@ qrc_resources.cpp: ../../resources.qrc \
 		../../eraser.png \
 		../../eyedropper.png \
 		../../move.png \
+		../../select.png \
 		../../fill.png \
 		../../brush.png
 	/Users/lara/Qt/6.7.2/macos/libexec/rcc -name resources --no-zstd ../../resources.qrc -o qrc_resources.cpp
@@ -900,7 +901,13 @@ compiler_clean: compiler_rcc_clean compiler_moc_header_clean compiler_uic_clean
 
 ####### Compile
 
-main.o: ../../main.cpp ../../mainwindow.h \
+main.o: ../../main.cpp ../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QApplication \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qapplication.h \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QMessageBox \
+		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qmessagebox.h \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QDebug \
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qdebug.h \
+		../../mainwindow.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QMainWindow \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qmainwindow.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QGraphicsScene \
@@ -934,9 +941,7 @@ main.o: ../../main.cpp ../../mainwindow.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QSizeF \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qsize.h \
 		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/QXmlStreamReader \
-		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qxmlstream.h \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QApplication \
-		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qapplication.h
+		../../../Qt/6.7.2/macos/lib/QtCore.framework/Headers/qxmlstream.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o main.o ../../main.cpp
 
 mainwindow.o: ../../mainwindow.cpp ../../mainwindow.h \
@@ -1008,7 +1013,8 @@ mainwindow.o: ../../mainwindow.cpp ../../mainwindow.h \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/QScrollArea \
 		../../../Qt/6.7.2/macos/lib/QtWidgets.framework/Headers/qscrollarea.h \
 		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QAction \
-		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qaction.h
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/qaction.h \
+		../../../Qt/6.7.2/macos/lib/QtGui.framework/Headers/QEnterEvent
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o mainwindow.o ../../mainwindow.cpp
 
 entity.o: ../../entity.cpp ../../entity.h \
