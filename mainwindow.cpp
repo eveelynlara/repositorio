@@ -201,10 +201,72 @@ void MainWindow::setupUI()
 
     // Criar o painel de propriedades
     m_propertiesDock = new QDockWidget("Propriedades", this);
+    QWidget *propertiesWidget = new QWidget(m_propertiesDock);
+    QVBoxLayout *propertiesLayout = new QVBoxLayout(propertiesWidget);
+
+    QLabel *posLabel = new QLabel("Posição:", propertiesWidget);
+    propertiesLayout->addWidget(posLabel);
+
+    QHBoxLayout *posLayout = new QHBoxLayout();
+    m_posXSpinBox = new QDoubleSpinBox(propertiesWidget);
+    m_posYSpinBox = new QDoubleSpinBox(propertiesWidget);
+    m_posXSpinBox->setRange(-10000, 10000);
+    m_posYSpinBox->setRange(-10000, 10000);
+    posLayout->addWidget(new QLabel("X:"));
+    posLayout->addWidget(m_posXSpinBox);
+    posLayout->addWidget(new QLabel("Y:"));
+    posLayout->addWidget(m_posYSpinBox);
+    propertiesLayout->addLayout(posLayout);
+
+    propertiesWidget->setLayout(propertiesLayout);
+    m_propertiesDock->setWidget(propertiesWidget);
     addDockWidget(Qt::RightDockWidgetArea, m_propertiesDock);
+
+    connect(m_posXSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::updateSelectedEntityPosition);
+    connect(m_posYSpinBox, QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+            this, &MainWindow::updateSelectedEntityPosition);
 
     // Configurar a barra de status
     this->statusBar()->showMessage("Pronto");
+}
+
+void MainWindow::updateSelectedEntityPosition()
+{
+    if (m_currentTool == SelectTool && m_currentSelectedItem) {
+        QPointF newPos(m_posXSpinBox->value(), m_posYSpinBox->value());
+        QPointF oldPos = m_currentSelectedItem->pos();
+        m_currentSelectedItem->setPos(newPos);
+        m_scene->update();
+        
+        Entity* entity = getEntityForGraphicsItem(m_currentSelectedItem);
+        if (entity) {
+            Action action;
+            action.type = Action::MOVE;
+            action.entity = entity;
+            action.oldPos = oldPos;
+            action.newPos = newPos;
+            addAction(action);
+            qCInfo(mainWindowCategory) << "Entidade movida:" << entity->getName() 
+                                       << "de" << oldPos << "para" << newPos;
+        } else {
+            qCWarning(mainWindowCategory) << "Não foi possível encontrar a entidade para o item selecionado";
+        }
+    }
+}
+
+Entity* MainWindow::getEntityForGraphicsItem(QGraphicsItem* item)
+{
+    QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
+    if (pixmapItem) {
+        auto it = m_entityPlacements.find(pixmapItem);
+        if (it != m_entityPlacements.end()) {
+            qCInfo(mainWindowCategory) << "Entidade encontrada para o item na posição:" << pixmapItem->pos();
+            return it.value().entity;
+        }
+    }
+    qCWarning(mainWindowCategory) << "Nenhuma entidade encontrada para o item na posição:" << item->pos();
+    return nullptr;
 }
 
 void MainWindow::setupProjectExplorer()
@@ -379,6 +441,7 @@ void MainWindow::setupTileList()
 void MainWindow::activateBrushTool()
 {
     m_currentTool = BrushTool;
+    clearSelection();
     updatePaintingMode();
     m_sceneView->setDragMode(QGraphicsView::NoDrag);
     m_sceneView->setCursor(Qt::CrossCursor);
@@ -463,11 +526,11 @@ void MainWindow::createActions()
 void MainWindow::activateSelectTool()
 {
     m_currentTool = SelectTool;
-    updatePaintingMode();
     m_sceneView->setDragMode(QGraphicsView::RubberBandDrag);
     m_sceneView->setCursor(Qt::ArrowCursor);
-    clearPreview(); // Limpa qualquer preview existente
+    clearPreview();
     updateToolbarState();
+    updatePropertiesPanel();
     qCInfo(mainWindowCategory) << "Ferramenta de seleção ativada";
 }
 
@@ -1133,17 +1196,19 @@ void MainWindow::paintWithBrush(const QPointF &pos)
     }
 
     if (canPlace) {
-        QGraphicsPixmapItem* newItem = placeEntityInScene(finalPos);
-        
-        if (newItem) {
-            qCInfo(mainWindowCategory) << "Nova entidade adicionada na posição:" << newItem->pos();
-            if (m_paintingMode) {
-                m_occupiedPositions.insert(gridPos, true);
-            }
-        } else {
-            qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << finalPos;
+    QGraphicsItem* newItem = placeEntityInScene(finalPos);
+    if (newItem) {
+        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(newItem);
+        if (pixmapItem) {
+            // Use pixmapItem aqui se necessário
+        }
+        qCInfo(mainWindowCategory) << "Nova entidade adicionada na posição:" << newItem->pos();
+        if (m_paintingMode) {
+            m_occupiedPositions.insert(gridPos, true);
         }
     } else {
+        qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << finalPos;
+    }
         qCInfo(mainWindowCategory) << "Não foi possível colocar a entidade na posição:" << finalPos;
     }
 }
@@ -1171,10 +1236,22 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     if (watched == m_scene) {
         if (event->type() == QEvent::GraphicsSceneMousePress) {
             QGraphicsSceneMouseEvent *mouseEvent = static_cast<QGraphicsSceneMouseEvent*>(event);
-            QGraphicsItem *item = m_scene->itemAt(mouseEvent->scenePos(), QTransform());
-            if (item && item->flags() & QGraphicsItem::ItemIsMovable) {
-                m_movingItem = dynamic_cast<QGraphicsPixmapItem*>(item);
-                m_oldPosition = m_movingItem->pos();
+            if (m_currentTool == SelectTool) {
+                // Limpe a seleção atual
+                m_scene->clearSelection();
+                
+                // Selecione o novo item
+                QGraphicsItem *clickedItem = m_scene->itemAt(mouseEvent->scenePos(), QTransform());
+                if (clickedItem) {
+                    clickedItem->setSelected(true);
+                    m_currentSelectedItem = clickedItem;
+                    updatePropertiesPanel();
+                    qCInfo(mainWindowCategory) << "Nova entidade selecionada na posição:" << clickedItem->pos();
+                } else {
+                    m_currentSelectedItem = nullptr;
+                    updatePropertiesPanel();
+                    qCInfo(mainWindowCategory) << "Nenhuma entidade selecionada";
+                }
             }
         } else if (event->type() == QEvent::GraphicsSceneMouseRelease) {
             if (m_movingItem) {
@@ -1234,6 +1311,14 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return QMainWindow::eventFilter(watched, event);
+}
+
+void MainWindow::clearSelection()
+{
+    m_scene->clearSelection();
+    m_currentSelectedItem = nullptr;
+    updatePropertiesPanel();
+    qCInfo(mainWindowCategory) << "Seleção limpa";
 }
 
 void MainWindow::handleArrowKeyPress(QKeyEvent *event)
@@ -1310,7 +1395,7 @@ void MainWindow::onSceneViewMousePress(QMouseEvent *event)
     }
 }
 
-QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndoStack, Entity* entity, int tileIndex, bool updatePreview)
+QGraphicsItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndoStack, Entity* entity, int tileIndex, bool updatePreview)
 {
     if (!entity) {
         entity = m_selectedEntity;
@@ -1338,7 +1423,6 @@ QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos, bool add
                 entitySize = QSizeF(32, 32);
             }
         }
-        qCInfo(mainWindowCategory) << "Tamanho da entidade:" << entitySize;
 
         QPointF finalPos = pos;
         
@@ -1346,25 +1430,36 @@ QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos, bool add
             qreal gridX = qRound(pos.x() / entitySize.width()) * entitySize.width();
             qreal gridY = qRound(pos.y() / entitySize.height()) * entitySize.height();
             finalPos = QPointF(gridX, gridY);
-            qCInfo(mainWindowCategory) << "Posição ajustada à grade:" << finalPos;
         }
 
-        QPixmap tilePixmap = createEntityPixmap(entitySize, entity, tileIndex);
-        QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
-        if (!item) {
-            qCWarning(mainWindowCategory) << "Falha ao adicionar item à cena";
-            return nullptr;
+        QGraphicsItem* item;
+        if (entity->isInvisible()) {
+            QGraphicsRectItem* invisibleItem = new QGraphicsRectItem(QRectF(0, 0, entitySize.width(), entitySize.height()));
+            invisibleItem->setPen(QPen(Qt::red, 2, Qt::DashLine));
+            invisibleItem->setBrush(Qt::transparent);
+            invisibleItem->setPos(finalPos);
+            invisibleItem->setFlag(QGraphicsItem::ItemIsSelectable);
+            invisibleItem->setFlag(QGraphicsItem::ItemIsMovable);
+            m_scene->addItem(invisibleItem);
+            item = invisibleItem;
+        } else {
+            QPixmap tilePixmap = createEntityPixmap(entitySize, entity, tileIndex);
+            QGraphicsPixmapItem *pixmapItem = m_scene->addPixmap(tilePixmap);
+            pixmapItem->setPos(finalPos);
+            pixmapItem->setFlag(QGraphicsItem::ItemIsMovable);
+            pixmapItem->setFlag(QGraphicsItem::ItemIsSelectable);
+            item = pixmapItem;
         }
-        item->setPos(finalPos);
-        item->setFlag(QGraphicsItem::ItemIsMovable);
-        item->setFlag(QGraphicsItem::ItemIsSelectable);
 
         EntityPlacement placement;
         placement.entity = entity;
         placement.tileIndex = tileIndex;
+        placement.item = item;
         m_entityPlacements[item] = placement;
+        qCInfo(mainWindowCategory) << "Entidade adicionada ao m_entityPlacements:" 
+                           << entity->getName() << "na posição:" << item->pos();
 
-        qCInfo(mainWindowCategory) << "Placement adicionado ao mapa de entidades. Total de placements:" << m_entityPlacements.size();
+        // qCInfo(mainWindowCategory) << "Placement adicionado ao mapa de entidades. Total de placements:" << m_entityPlacements.size();
 
         // Adicionar ação para Undo/Redo apenas se addToUndoStack for true
         if (addToUndoStack) {
@@ -1385,7 +1480,7 @@ QGraphicsPixmapItem* MainWindow::placeEntityInScene(const QPointF &pos, bool add
         qCInfo(mainWindowCategory) << "Preview da entidade atualizado";
 
         qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos << "com tamanho:" << entitySize;
-        logToFile("Entidade colocada na cena: " + m_selectedEntity->getName());
+        logToFile("Entidade colocada na cena: " + entity->getName());
 
         qCInfo(mainWindowCategory) << "Método placeEntityInScene concluído com sucesso";
 
@@ -1531,7 +1626,7 @@ void MainWindow::mouseMoveEvent(QMouseEvent *event)
 void MainWindow::updateEntityPositions()
 {
     for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-        QGraphicsPixmapItem* item = it.key();
+        QGraphicsItem* item = it.key();
         const EntityPlacement& placement = it.value();
         QSizeF tileSize = placement.entity->getCurrentSize();
         QPointF currentPos = item->pos();
@@ -1573,7 +1668,11 @@ bool MainWindow::undo()
                 {
                     for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
                         if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
-                            QGraphicsPixmapItem* item = it.key();
+                            QGraphicsItem* item = it.key();
+                            QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
+                            if (pixmapItem) {
+                                // Use pixmapItem aqui se necessário
+                            }
                             m_scene->removeItem(item);
                             m_entityPlacements.erase(it);
                             delete item;
@@ -1585,26 +1684,31 @@ bool MainWindow::undo()
                 }
                 break;
             case Action::REMOVE:
-                {
-                    Entity* entityToRestore = m_entityManager->getEntityByName(action.entityName);
-                    if (entityToRestore) {
-                        m_selectedEntity = entityToRestore;
-                        m_selectedTileIndex = action.tileIndex;
-                        QGraphicsPixmapItem* newItem = placeEntityInScene(action.oldPos, false, entityToRestore, action.tileIndex, false);
-                        if (newItem) {
-                            qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entityName
-                                                    << "na posição:" << action.oldPos
-                                                    << "com tile index:" << action.tileIndex;
-                        }
+            {
+                for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
+                    if (it.key()->pos() == action.oldPos && it.value().entity->getName() == action.entityName) {
+                        QGraphicsItem* item = it.key();
+                        m_scene->removeItem(item);
+                        m_entityPlacements.erase(it);
+                        delete item;
+                        actionPerformed = true;
+                        qCInfo(mainWindowCategory) << "Entidade removida da cena:" << action.entityName
+                                                << "na posição:" << action.oldPos;
+                        break;
                     }
                 }
-                break;
+            }
+            break;
             case Action::MOVE:
                 {
                     for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                        if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
-                            it.key()->setPos(action.oldPos);
-                            qCInfo(mainWindowCategory) << "Entidade movida de volta para a posição:" << action.oldPos;
+                        if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
+                            QGraphicsItem* item = it.key();
+                            item->setPos(action.newPos);
+                            actionPerformed = true;
+                            qCInfo(mainWindowCategory) << "Entidade movida na cena:" << action.entity->getName()
+                                                    << "da posição:" << action.oldPos
+                                                    << "para:" << action.newPos;
                             break;
                         }
                     }
@@ -1653,18 +1757,20 @@ bool MainWindow::redo()
             qCWarning(mainWindowCategory) << "Ação inválida encontrada na pilha de redo";
             return false;
         }
-
         switch (action.type) {
             case Action::ADD:
                 {
                     m_selectedEntity = action.entity;
                     m_selectedTileIndex = action.tileIndex;
-                    QGraphicsPixmapItem* newItem = placeEntityInScene(action.newPos, false, action.entity, action.tileIndex, false);
+                    QGraphicsItem* newItem = placeEntityInScene(action.newPos, false, action.entity, action.tileIndex, false);
                     if (newItem) {
-                        actionPerformed = true;
-                        qCInfo(mainWindowCategory) << "Entidade adicionada na cena:" << action.entity->getName()
-                                                   << "na posição:" << action.newPos
-                                                   << "com tile index:" << action.tileIndex;
+                        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(newItem);
+                        if (pixmapItem) {
+                            // Use pixmapItem aqui se necessário
+                        }
+                        qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entityName
+                                                << "na posição:" << action.newPos
+                                                << "com tile index:" << action.tileIndex;
                     }
                 }
                 break;
@@ -1672,7 +1778,7 @@ bool MainWindow::redo()
                 {
                     for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
                         if (it.key()->pos() == action.oldPos && it.value().entity->getName() == action.entityName) {
-                            QGraphicsPixmapItem* item = it.key();
+                            QGraphicsItem* item = it.key();
                             m_scene->removeItem(item);
                             m_entityPlacements.erase(it);
                             delete item;
@@ -1685,19 +1791,20 @@ bool MainWindow::redo()
                 }
                 break;
             case Action::MOVE:
-                {
-                    for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                        if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
-                            it.key()->setPos(action.newPos);
-                            actionPerformed = true;
-                            qCInfo(mainWindowCategory) << "Entidade movida na cena:" << action.entity->getName()
-                                                       << "da posição:" << action.oldPos
-                                                       << "para:" << action.newPos;
-                            break;
-                        }
+            {
+                for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
+                    if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
+                        QGraphicsItem* item = it.key();
+                        item->setPos(action.newPos);
+                        actionPerformed = true;
+                        qCInfo(mainWindowCategory) << "Entidade movida na cena:" << action.entity->getName()
+                                                << "da posição:" << action.oldPos
+                                                << "para:" << action.newPos;
+                        break;
                     }
                 }
-                break;
+            }
+            break;
         }
 
         // Restaure a entidade e tile index originais
@@ -2037,6 +2144,20 @@ void MainWindow::handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos
     }
 
     qCWarning(mainWindowCategory) << "Nenhum tile selecionado";
+}
+
+void MainWindow::updatePropertiesPanel()
+{
+    if (m_currentTool == SelectTool && m_currentSelectedItem) {
+        QPointF pos = m_currentSelectedItem->pos();
+        m_posXSpinBox->setValue(pos.x());
+        m_posYSpinBox->setValue(pos.y());
+        m_propertiesDock->setEnabled(true);
+        qCInfo(mainWindowCategory) << "Painel de propriedades ativado. Posição:" << pos;
+    } else {
+        m_propertiesDock->setEnabled(false);
+        qCInfo(mainWindowCategory) << "Painel de propriedades desativado";
+    }
 }
 
 Entity* MainWindow::getEntityForPixmapItem(QGraphicsPixmapItem* item)

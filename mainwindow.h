@@ -10,6 +10,7 @@
 #include <QDockWidget>
 #include <QLabel>
 #include <QStack>
+#include <QDoubleSpinBox>
 #include "entitymanager.h"
 #include "entity.h"
 
@@ -32,9 +33,16 @@ public:
         MoveTool,
         BrushTool
     };
-    QGraphicsPixmapItem* placeEntityInScene(const QPointF &pos, bool addToUndoStack = true, Entity* entity = nullptr, int tileIndex = -1, bool updatePreview = true);
+    QGraphicsItem* placeEntityInScene(const QPointF &pos, bool addToUndoStack = true, Entity* entity = nullptr, int tileIndex = -1, bool updatePreview = true);
 
 private:
+    Entity* getEntityForGraphicsItem(QGraphicsItem* item);
+    QGraphicsItem* m_currentSelectedItem;
+    void updatePropertiesPanel();
+    void updateSelectedEntityPosition();
+    QList<QGraphicsItem*> m_selectedItems;
+    QDoubleSpinBox *m_posXSpinBox;
+    QDoubleSpinBox *m_posYSpinBox;
     QPixmap m_preservedPreviewPixmap;
     QPixmap createErasePreviewPixmap();
     Entity* m_preservedPreviewEntity;
@@ -69,6 +77,7 @@ private:
     struct EntityPlacement {
         Entity *entity;
         int tileIndex;
+        QGraphicsItem *item;
     };
 
     void logToFile(const QString& message);
@@ -78,7 +87,7 @@ private:
     // Adicione esta variável de membro
     int updateCount;
 
-    QMap<QGraphicsPixmapItem*, EntityPlacement> m_entityPlacements;
+    QMap<QGraphicsItem*, EntityPlacement> m_entityPlacements;
 
     // Estrutura para armazenar ações
     struct Action {
