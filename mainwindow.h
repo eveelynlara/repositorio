@@ -36,6 +36,7 @@ public:
     QGraphicsItem* placeEntityInScene(const QPointF &pos, bool addToUndoStack = true, Entity* entity = nullptr, int tileIndex = -1, bool updatePreview = true);
 
 private:
+    void onSelectionChanged();
     Entity* getEntityForGraphicsItem(QGraphicsItem* item);
     QGraphicsItem* m_currentSelectedItem;
     void updatePropertiesPanel();
@@ -164,7 +165,7 @@ protected:
     void enterEvent(QEnterEvent *event) override;
 
 public slots:
-    void importScene();    
+    void importScene();  
 
 private slots:
     void clearCurrentScene();

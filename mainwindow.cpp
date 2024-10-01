@@ -24,6 +24,8 @@
 #include <QAction>
 #include <QEnterEvent>
 #include <QMap>
+#include <QDoubleSpinBox>
+#include <QHBoxLayout>
 
 Q_LOGGING_CATEGORY(mainWindowCategory, "MainWindow")
 
@@ -247,10 +249,6 @@ void MainWindow::updateSelectedEntityPosition()
             action.oldPos = oldPos;
             action.newPos = newPos;
             addAction(action);
-            qCInfo(mainWindowCategory) << "Entidade movida:" << entity->getName() 
-                                       << "de" << oldPos << "para" << newPos;
-        } else {
-            qCWarning(mainWindowCategory) << "Não foi possível encontrar a entidade para o item selecionado";
         }
     }
 }
@@ -529,9 +527,29 @@ void MainWindow::activateSelectTool()
     updatePaintingMode();
     m_sceneView->setDragMode(QGraphicsView::RubberBandDrag);
     m_sceneView->setCursor(Qt::ArrowCursor);
-    clearPreview(); // Limpa qualquer preview existente
+    clearPreview();
     updateToolbarState();
+    
+    // Desconectar conexões anteriores
+    disconnect(m_scene, nullptr, this, nullptr);
+    
+    // Conectar o sinal de seleção alterada
+    connect(m_scene, &QGraphicsScene::selectionChanged,
+            this, &MainWindow::onSelectionChanged);
+    
     qCInfo(mainWindowCategory) << "Ferramenta de seleção ativada";
+}
+
+void MainWindow::onSelectionChanged()
+{
+    QList<QGraphicsItem*> selectedItems = m_scene->selectedItems();
+    if (selectedItems.size() == 1) {
+        m_currentSelectedItem = selectedItems.first();
+        updatePropertiesPanel();
+    } else {
+        m_currentSelectedItem = nullptr;
+        m_propertiesDock->setEnabled(false);
+    }
 }
 
 // void MainWindow::activateMoveTool()
@@ -1048,9 +1066,9 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
     m_previewItem->setPos(adjustedPos);
     m_previewItem->show();
 
-    qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos 
+    /*qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos 
                                << "Shift:" << m_shiftPressed 
-                               << "Ctrl:" << m_ctrlPressed;
+                               << "Ctrl:" << m_ctrlPressed;*/
 }
 
 void MainWindow::clearPreviewIfNotBrushTool()
@@ -1260,15 +1278,8 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             QGraphicsSceneMouseEvent *mouseEvent = static_cast<QGraphicsSceneMouseEvent*>(event);
             QGraphicsItem *item = m_scene->itemAt(mouseEvent->scenePos(), QTransform());
             if (item && item->flags() & QGraphicsItem::ItemIsMovable) {
-                if (QGraphicsRectItem *rectItem = qgraphicsitem_cast<QGraphicsRectItem*>(item)) {
-                    m_movingItem = rectItem;
-                } else if (QGraphicsPixmapItem *pixmapItem = qgraphicsitem_cast<QGraphicsPixmapItem*>(item)) {
-                    m_movingItem = pixmapItem;
-                }
-                if (m_movingItem) {
-                    m_oldPosition = m_movingItem->pos();
-                    qCDebug(mainWindowCategory) << "Iniciando potencial movimento de item na posição:" << m_oldPosition;
-                }
+                m_movingItem = item;
+                m_oldPosition = m_movingItem->pos();
             }
         } else if (event->type() == QEvent::GraphicsSceneMouseRelease) {
             if (m_movingItem) {
@@ -1281,9 +1292,7 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
                     action.oldPos = m_oldPosition;
                     action.newPos = newPosition;
                     addAction(action);
-                    qCDebug(mainWindowCategory) << "Movimento de item finalizado. Nova posição:" << newPosition;
-                } else {
-                    qCDebug(mainWindowCategory) << "Item clicado, mas não movido. Posição:" << newPosition;
+                    updatePropertiesPanel();
                 }
                 m_movingItem = nullptr;
             }
@@ -1673,85 +1682,52 @@ bool MainWindow::undo()
         return false;
     }
 
-    Entity* originalSelectedEntity = m_selectedEntity;
-    int originalSelectedTileIndex = m_selectedTileIndex;
-    bool actionPerformed = false;
-
-    try {
-        preserveCurrentPreview();
-        Action action = undoStack.pop();
-        
-        if (!action.entity) {
-            qCWarning(mainWindowCategory) << "Ação inválida encontrada na pilha de undo";
-            return false;
-        }
-
-        switch (action.type) {
-            case Action::ADD:
-                {
-                    for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                        if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
-                            QGraphicsItem* item = it.key();
-                            m_scene->removeItem(item);
-                            m_entityPlacements.erase(it);
-                            delete item;
-                            actionPerformed = true;
-                            qCInfo(mainWindowCategory) << "Entidade removida da cena na posição:" << action.newPos;
-                            break;
-                        }
+    Action action = undoStack.pop();
+    
+    switch (action.type) {
+        case Action::ADD:
+            {
+                for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
+                    if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
+                        QGraphicsItem* item = it.key();
+                        m_scene->removeItem(item);
+                        m_entityPlacements.erase(it);
+                        delete item;
+                        qCInfo(mainWindowCategory) << "Entidade removida da cena na posição:" << action.newPos;
+                        break;
                     }
                 }
-                break;
-            case Action::REMOVE:
-                {
-                    Entity* entityToRestore = m_entityManager->getEntityByName(action.entityName);
-                    if (entityToRestore) {
-                        m_selectedEntity = entityToRestore;
-                        m_selectedTileIndex = action.tileIndex;
-                        QGraphicsItem* newItem = placeEntityInScene(action.oldPos, false, entityToRestore, action.tileIndex, false);
-                        if (newItem) {
-                            actionPerformed = true;
-                            qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entityName
-                                                    << "na posição:" << action.oldPos
-                                                    << "com tile index:" << action.tileIndex;
-                        }
+            }
+            break;
+        case Action::REMOVE:
+            {
+                QGraphicsItem* newItem = placeEntityInScene(action.oldPos, false, action.entity, action.tileIndex);
+                if (newItem) {
+                    qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entity->getName()
+                                               << "na posição:" << action.oldPos;
+                }
+            }
+            break;
+        case Action::MOVE:
+            {
+                for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
+                    if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
+                        it.key()->setPos(action.oldPos);
+                        qCInfo(mainWindowCategory) << "Entidade movida de volta para a posição:" << action.oldPos;
+                        break;
                     }
                 }
-                break;
-            case Action::MOVE:
-                {
-                    for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                        if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
-                            it.key()->setPos(action.oldPos);
-                            actionPerformed = true;
-                            qCInfo(mainWindowCategory) << "Entidade movida de volta para a posição:" << action.oldPos;
-                            break;
-                        }
-                    }
-                }
-                break;
-        }
-
-        m_selectedEntity = originalSelectedEntity;
-        m_selectedTileIndex = originalSelectedTileIndex;
-
-        redoStack.push(action);
-        if (actionPerformed) {
-            updateGrid();
-            update();
-            qCInfo(mainWindowCategory) << "Undo realizado com sucesso para ação do tipo:" << action.type 
-                                       << ". Tamanho da pilha de undo:" << undoStack.size()
-                                       << ". Tamanho da pilha de redo:" << redoStack.size();
-        }
-
-    } catch (const std::exception& e) {
-        qCCritical(mainWindowCategory) << "Erro durante a operação de desfazer:" << e.what();
-    } catch (...) {
-        qCCritical(mainWindowCategory) << "Erro desconhecido durante a operação de desfazer";
+            }
+            break;
     }
 
-    restorePreservedPreview();
-    return actionPerformed;
+    redoStack.push(action);
+    updateGrid();
+    update();
+    qCInfo(mainWindowCategory) << "Undo realizado com sucesso para ação do tipo:" << action.type 
+                               << ". Tamanho da pilha de undo:" << undoStack.size()
+                               << ". Tamanho da pilha de redo:" << redoStack.size();
+    return true;
 }
 
 bool MainWindow::redo()
@@ -1761,89 +1737,52 @@ bool MainWindow::redo()
         return false;
     }
 
-    Entity* originalSelectedEntity = m_selectedEntity;
-    int originalSelectedTileIndex = m_selectedTileIndex;
-    bool actionPerformed = false;
-
-    try {
-        preserveCurrentPreview();
-        Action action = redoStack.pop();
-        
-        if (!action.entity) {
-            qCWarning(mainWindowCategory) << "Ação inválida encontrada na pilha de redo";
-            return false;
-        }
-        switch (action.type) {
-            case Action::ADD:
-                {
-                    m_selectedEntity = action.entity;
-                    m_selectedTileIndex = action.tileIndex;
-                    QGraphicsItem* newItem = placeEntityInScene(action.newPos, false, action.entity, action.tileIndex, false);
-                    if (newItem) {
-                        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(newItem);
-                        if (pixmapItem) {
-                            // Use pixmapItem aqui se necessário
-                        }
-                        qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entityName
-                                                << "na posição:" << action.newPos
-                                                << "com tile index:" << action.tileIndex;
-                    }
+    Action action = redoStack.pop();
+    
+    switch (action.type) {
+        case Action::ADD:
+            {
+                QGraphicsItem* newItem = placeEntityInScene(action.newPos, false, action.entity, action.tileIndex);
+                if (newItem) {
+                    qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entity->getName()
+                                               << "na posição:" << action.newPos;
                 }
-                break;
-            case Action::REMOVE:
-                {
-                    for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                        if (it.key()->pos() == action.oldPos && it.value().entity->getName() == action.entityName) {
-                            QGraphicsItem* item = it.key();
-                            m_scene->removeItem(item);
-                            m_entityPlacements.erase(it);
-                            delete item;
-                            actionPerformed = true;
-                            qCInfo(mainWindowCategory) << "Entidade removida da cena:" << action.entityName
-                                                       << "na posição:" << action.oldPos;
-                            break;
-                        }
-                    }
-                }
-                break;
-            case Action::MOVE:
+            }
+            break;
+        case Action::REMOVE:
             {
                 for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
                     if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
                         QGraphicsItem* item = it.key();
-                        item->setPos(action.newPos);
-                        actionPerformed = true;
-                        qCInfo(mainWindowCategory) << "Entidade movida na cena:" << action.entity->getName()
-                                                << "da posição:" << action.oldPos
-                                                << "para:" << action.newPos;
+                        m_scene->removeItem(item);
+                        m_entityPlacements.erase(it);
+                        delete item;
+                        qCInfo(mainWindowCategory) << "Entidade removida da cena na posição:" << action.oldPos;
                         break;
                     }
                 }
             }
             break;
-        }
-
-        // Restaure a entidade e tile index originais
-        m_selectedEntity = originalSelectedEntity;
-        m_selectedTileIndex = originalSelectedTileIndex;
-        
-        undoStack.push(action);  // Sempre adicione a ação à pilha de undo        
-        if (actionPerformed) {
-            updateGrid();
-            update();
-            qCInfo(mainWindowCategory) << "Redo realizado com sucesso para ação do tipo:" << action.type 
-                                       << ". Tamanho da pilha de undo:" << undoStack.size()
-                                       << ". Tamanho da pilha de redo:" << redoStack.size();
-        }
-
-    } catch (const std::exception& e) {
-        qCCritical(mainWindowCategory) << "Erro durante a operação de refazer:" << e.what();
-    } catch (...) {
-        qCCritical(mainWindowCategory) << "Erro desconhecido durante a operação de refazer";
+        case Action::MOVE:
+            {
+                for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
+                    if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
+                        it.key()->setPos(action.newPos);
+                        qCInfo(mainWindowCategory) << "Entidade movida para a posição:" << action.newPos;
+                        break;
+                    }
+                }
+            }
+            break;
     }
 
-    restorePreservedPreview();
-    return actionPerformed;
+    undoStack.push(action);
+    updateGrid();
+    update();
+    qCInfo(mainWindowCategory) << "Redo realizado com sucesso para ação do tipo:" << action.type 
+                               << ". Tamanho da pilha de undo:" << undoStack.size()
+                               << ". Tamanho da pilha de redo:" << redoStack.size();
+    return true;
 }
 
 void MainWindow::preserveCurrentPreview()
@@ -2189,10 +2128,8 @@ void MainWindow::updatePropertiesPanel()
         m_posXSpinBox->setValue(pos.x());
         m_posYSpinBox->setValue(pos.y());
         m_propertiesDock->setEnabled(true);
-        qCInfo(mainWindowCategory) << "Painel de propriedades ativado. Posição:" << pos;
     } else {
         m_propertiesDock->setEnabled(false);
-        qCInfo(mainWindowCategory) << "Painel de propriedades desativado";
     }
 }
 
