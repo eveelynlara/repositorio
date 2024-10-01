@@ -78,6 +78,8 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    clearPreview();
+    
     if (m_previewUpdateTimer) {
         m_previewUpdateTimer->stop();
         delete m_previewUpdateTimer;
@@ -104,23 +106,21 @@ void MainWindow::eraseEntity()
     QRectF eraseRect = m_previewItem->sceneBoundingRect();
     QList<QGraphicsItem*> itemsInRect = m_scene->items(eraseRect, Qt::IntersectsItemShape);
     
-    QGraphicsPixmapItem* itemToErase = nullptr;
+    QGraphicsItem* itemToErase = nullptr;
     qreal maxOverlapRatio = 0;
     qreal eraseThreshold = 0.25; // 25% da borracha deve sobrepor para apagar
 
     qreal eraseArea = eraseRect.width() * eraseRect.height();
 
     for (QGraphicsItem* item : itemsInRect) {
-        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
-        if (pixmapItem && m_entityPlacements.contains(pixmapItem) && pixmapItem != m_previewItem) {
-            QRectF intersection = eraseRect.intersected(pixmapItem->sceneBoundingRect());
+        if (m_entityPlacements.contains(item) && item != m_previewItem) {
+            QRectF intersection = eraseRect.intersected(item->sceneBoundingRect());
             qreal overlap = intersection.width() * intersection.height();
             qreal overlapRatio = overlap / eraseArea;
 
-            // Se 25% da borracha está sobre a entidade, marque para apagar
             if (overlapRatio > eraseThreshold && overlapRatio > maxOverlapRatio) {
                 maxOverlapRatio = overlapRatio;
-                itemToErase = pixmapItem;
+                itemToErase = item;
             }
         }
     }
@@ -150,7 +150,7 @@ QPixmap MainWindow::createErasePreviewPixmap()
     QPixmap pixmap(32, 32);
     pixmap.fill(Qt::transparent);
     QPainter painter(&pixmap);
-    painter.setPen(QPen(Qt::red, 2));
+    painter.setPen(QPen(Qt::red, 2, Qt::DashLine));
     painter.drawRect(0, 0, 31, 31);
     painter.drawLine(0, 0, 31, 31);
     painter.drawLine(0, 31, 31, 0);
@@ -526,11 +526,11 @@ void MainWindow::createActions()
 void MainWindow::activateSelectTool()
 {
     m_currentTool = SelectTool;
+    updatePaintingMode();
     m_sceneView->setDragMode(QGraphicsView::RubberBandDrag);
     m_sceneView->setCursor(Qt::ArrowCursor);
-    clearPreview();
+    clearPreview(); // Limpa qualquer preview existente
     updateToolbarState();
-    updatePropertiesPanel();
     qCInfo(mainWindowCategory) << "Ferramenta de seleção ativada";
 }
 
@@ -775,16 +775,29 @@ void MainWindow::updateEntityPreview()
             }
         }
 
-        QPixmap previewPixmap = createEntityPixmap(size, m_previewEntity, m_previewTileIndex);
-
-        if (!m_previewItem) {
-            m_previewItem = m_scene->addPixmap(previewPixmap);
-            m_previewItem->setOpacity(0.5);
-            m_previewItem->setZValue(1000);
-        } else {
-            m_previewItem->setPixmap(previewPixmap);
+        // Remover o preview existente, se houver
+        if (m_previewItem) {
+            m_scene->removeItem(m_previewItem);
+            delete m_previewItem;
+            m_previewItem = nullptr;
         }
 
+        if (m_selectedEntity->isInvisible()) {
+            QGraphicsRectItem* invisiblePreview = new QGraphicsRectItem(QRectF(0, 0, size.width(), size.height()));
+            invisiblePreview->setPen(QPen(Qt::red, 2, Qt::DashLine));
+            invisiblePreview->setBrush(Qt::transparent);
+            invisiblePreview->setOpacity(0.5);
+            invisiblePreview->setZValue(1000);
+            m_previewItem = invisiblePreview;
+        } else {
+            QPixmap previewPixmap = createEntityPixmap(size, m_previewEntity, m_previewTileIndex);
+            QGraphicsPixmapItem* pixmapPreview = new QGraphicsPixmapItem(previewPixmap);
+            pixmapPreview->setOpacity(0.5);
+            pixmapPreview->setZValue(1000);
+            m_previewItem = pixmapPreview;
+        }
+
+        m_scene->addItem(m_previewItem);
         m_previewItem->show();
 
         // Atualizar a posição do preview
@@ -1001,12 +1014,20 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
     }
 
     if (m_ctrlPressed) {
-        // Use o pixmap da borracha e ajuste a posição para centralizar
-        m_previewItem->setPixmap(createErasePreviewPixmap());
+        // Usar o mesmo preview de borracha para todos os tipos de entidades
+        QPixmap erasePixmap = createErasePreviewPixmap();
+        if (QGraphicsPixmapItem* pixmapItem = qgraphicsitem_cast<QGraphicsPixmapItem*>(m_previewItem)) {
+            pixmapItem->setPixmap(erasePixmap);
+        } else if (QGraphicsRectItem* rectItem = qgraphicsitem_cast<QGraphicsRectItem*>(m_previewItem)) {
+            // Remover o retângulo existente e substituí-lo por um QGraphicsPixmapItem
+            m_scene->removeItem(m_previewItem);
+            delete m_previewItem;
+            m_previewItem = m_scene->addPixmap(erasePixmap);
+            m_previewItem->setZValue(1000);
+        }
         adjustedPos -= QPointF(16, 16);  // Centraliza o preview da borracha
         m_previewItem->setOpacity(1.0);  // Totalmente visível no modo de apagar
     } else {
-        // Restaure o pixmap original da entidade
         QSizeF entitySize = m_selectedEntity->getCurrentSize();
         if (entitySize.isEmpty()) {
             entitySize = m_selectedEntity->getCollisionSize();
@@ -1014,7 +1035,13 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
                 entitySize = QSizeF(32, 32);
             }
         }
-        m_previewItem->setPixmap(createEntityPixmap(entitySize, m_selectedEntity, m_selectedTileIndex));
+        if (QGraphicsPixmapItem* pixmapItem = qgraphicsitem_cast<QGraphicsPixmapItem*>(m_previewItem)) {
+            pixmapItem->setPixmap(createEntityPixmap(entitySize, m_selectedEntity, m_selectedTileIndex));
+        } else if (QGraphicsRectItem* rectItem = qgraphicsitem_cast<QGraphicsRectItem*>(m_previewItem)) {
+            rectItem->setRect(QRectF(0, 0, entitySize.width(), entitySize.height()));
+            rectItem->setPen(QPen(Qt::red, 2, Qt::DashLine));
+            rectItem->setBrush(Qt::transparent);
+        }
         m_previewItem->setOpacity(0.5);  // Opacidade normal
     }
 
@@ -1181,7 +1208,6 @@ void MainWindow::paintWithBrush(const QPointF &pos)
         gridPos = qMakePair(gridX, gridY);
         finalPos = QPointF(gridX * entitySize.width(), gridY * entitySize.height());
     } else {
-        // Quando Shift não está pressionado, usamos a posição exata do mouse
         gridPos = qMakePair(qRound(pos.x()), qRound(pos.y()));
     }
 
@@ -1189,26 +1215,22 @@ void MainWindow::paintWithBrush(const QPointF &pos)
 
     bool canPlace = true;
 
-    // Verificar se já existe uma entidade nesta posição apenas se estivermos no modo de pintura
     if (m_paintingMode && m_occupiedPositions.contains(gridPos)) {
         qCInfo(mainWindowCategory) << "Entidade já existe na posição:" << finalPos << "(Modo de pintura)";
         canPlace = false;
     }
 
     if (canPlace) {
-    QGraphicsItem* newItem = placeEntityInScene(finalPos);
-    if (newItem) {
-        QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(newItem);
-        if (pixmapItem) {
-            // Use pixmapItem aqui se necessário
-        }
-        qCInfo(mainWindowCategory) << "Nova entidade adicionada na posição:" << newItem->pos();
-        if (m_paintingMode) {
-            m_occupiedPositions.insert(gridPos, true);
+        QGraphicsItem* newItem = placeEntityInScene(finalPos);
+        if (newItem) {
+            qCInfo(mainWindowCategory) << "Nova entidade adicionada na posição:" << newItem->pos();
+            if (m_paintingMode) {
+                m_occupiedPositions.insert(gridPos, true);
+            }
+        } else {
+            qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << finalPos;
         }
     } else {
-        qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << finalPos;
-    }
         qCInfo(mainWindowCategory) << "Não foi possível colocar a entidade na posição:" << finalPos;
     }
 }
@@ -1238,9 +1260,15 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             QGraphicsSceneMouseEvent *mouseEvent = static_cast<QGraphicsSceneMouseEvent*>(event);
             QGraphicsItem *item = m_scene->itemAt(mouseEvent->scenePos(), QTransform());
             if (item && item->flags() & QGraphicsItem::ItemIsMovable) {
-                m_movingItem = dynamic_cast<QGraphicsPixmapItem*>(item);
-                m_oldPosition = m_movingItem->pos();
-                qCDebug(mainWindowCategory) << "Iniciando potencial movimento de item na posição:" << m_oldPosition;
+                if (QGraphicsRectItem *rectItem = qgraphicsitem_cast<QGraphicsRectItem*>(item)) {
+                    m_movingItem = rectItem;
+                } else if (QGraphicsPixmapItem *pixmapItem = qgraphicsitem_cast<QGraphicsPixmapItem*>(item)) {
+                    m_movingItem = pixmapItem;
+                }
+                if (m_movingItem) {
+                    m_oldPosition = m_movingItem->pos();
+                    qCDebug(mainWindowCategory) << "Iniciando potencial movimento de item na posição:" << m_oldPosition;
+                }
             }
         } else if (event->type() == QEvent::GraphicsSceneMouseRelease) {
             if (m_movingItem) {
@@ -1511,6 +1539,7 @@ QPixmap MainWindow::createEntityPixmap(const QSizeF &size, Entity* entity, int t
     }
 
     if (entity->isInvisible()) {
+        pixmap.fill(Qt::transparent);
         painter.setPen(QPen(Qt::red, 2));
         painter.drawRect(pixmap.rect().adjusted(1, 1, -1, -1));
         painter.setFont(QFont("Arial", 8));
@@ -1520,7 +1549,7 @@ QPixmap MainWindow::createEntityPixmap(const QSizeF &size, Entity* entity, int t
             text = painter.fontMetrics().elidedText(text, Qt::ElideRight, pixmap.width() - 4);
         }
         painter.drawText(pixmap.rect(), Qt::AlignCenter, text);
-        qCInfo(mainWindowCategory) << "Desenhando entidade invisível";
+        return pixmap;
     } else if (entity->hasOnlyCollision()) {
         painter.setPen(QPen(Qt::blue, 2));
         painter.drawRect(pixmap.rect().adjusted(1, 1, -1, -1));
@@ -1663,10 +1692,6 @@ bool MainWindow::undo()
                     for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
                         if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
                             QGraphicsItem* item = it.key();
-                            QGraphicsPixmapItem* pixmapItem = dynamic_cast<QGraphicsPixmapItem*>(item);
-                            if (pixmapItem) {
-                                // Use pixmapItem aqui se necessário
-                            }
                             m_scene->removeItem(item);
                             m_entityPlacements.erase(it);
                             delete item;
@@ -1678,31 +1703,28 @@ bool MainWindow::undo()
                 }
                 break;
             case Action::REMOVE:
-            {
-                for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                    if (it.key()->pos() == action.oldPos && it.value().entity->getName() == action.entityName) {
-                        QGraphicsItem* item = it.key();
-                        m_scene->removeItem(item);
-                        m_entityPlacements.erase(it);
-                        delete item;
-                        actionPerformed = true;
-                        qCInfo(mainWindowCategory) << "Entidade removida da cena:" << action.entityName
-                                                << "na posição:" << action.oldPos;
-                        break;
+                {
+                    Entity* entityToRestore = m_entityManager->getEntityByName(action.entityName);
+                    if (entityToRestore) {
+                        m_selectedEntity = entityToRestore;
+                        m_selectedTileIndex = action.tileIndex;
+                        QGraphicsItem* newItem = placeEntityInScene(action.oldPos, false, entityToRestore, action.tileIndex, false);
+                        if (newItem) {
+                            actionPerformed = true;
+                            qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entityName
+                                                    << "na posição:" << action.oldPos
+                                                    << "com tile index:" << action.tileIndex;
+                        }
                     }
                 }
-            }
-            break;
+                break;
             case Action::MOVE:
                 {
                     for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                        if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
-                            QGraphicsItem* item = it.key();
-                            item->setPos(action.newPos);
+                        if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
+                            it.key()->setPos(action.oldPos);
                             actionPerformed = true;
-                            qCInfo(mainWindowCategory) << "Entidade movida na cena:" << action.entity->getName()
-                                                    << "da posição:" << action.oldPos
-                                                    << "para:" << action.newPos;
+                            qCInfo(mainWindowCategory) << "Entidade movida de volta para a posição:" << action.oldPos;
                             break;
                         }
                     }
@@ -1828,7 +1850,11 @@ void MainWindow::preserveCurrentPreview()
 {
     m_preservedPreviewEntity = m_previewEntity;
     m_preservedPreviewTileIndex = m_previewTileIndex;
-    m_preservedPreviewPixmap = m_previewItem ? m_previewItem->pixmap() : QPixmap();
+    if (QGraphicsPixmapItem* pixmapItem = qgraphicsitem_cast<QGraphicsPixmapItem*>(m_previewItem)) {
+        m_preservedPreviewPixmap = pixmapItem->pixmap();
+    } else {
+        m_preservedPreviewPixmap = QPixmap();
+    }
 }
 
 void MainWindow::restorePreservedPreview()
@@ -1836,8 +1862,14 @@ void MainWindow::restorePreservedPreview()
     if (m_preservedPreviewEntity) {
         m_previewEntity = m_preservedPreviewEntity;
         m_previewTileIndex = m_preservedPreviewTileIndex;
-        if (m_previewItem && !m_preservedPreviewPixmap.isNull()) {
-            m_previewItem->setPixmap(m_preservedPreviewPixmap);
+        if (QGraphicsPixmapItem* pixmapItem = qgraphicsitem_cast<QGraphicsPixmapItem*>(m_previewItem)) {
+            if (!m_preservedPreviewPixmap.isNull()) {
+                pixmapItem->setPixmap(m_preservedPreviewPixmap);
+            }
+        } else if (QGraphicsRectItem* rectItem = qgraphicsitem_cast<QGraphicsRectItem*>(m_previewItem)) {
+            // Restaurar as propriedades do retângulo, se necessário
+            rectItem->setPen(QPen(Qt::red, 2, Qt::DashLine));
+            rectItem->setBrush(Qt::transparent);
         }
     }
 }

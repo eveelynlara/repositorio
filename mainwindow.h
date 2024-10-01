@@ -68,7 +68,7 @@ private:
     QString m_currentScenePath;
     Entity *m_selectedEntity;
     int m_selectedTileIndex;
-    QGraphicsPixmapItem *m_previewItem;
+    QGraphicsItem* m_previewItem;
     bool m_shiftPressed;
     int m_gridSize;
     Tool m_currentTool;
@@ -103,7 +103,7 @@ private:
 
     QStack<Action> undoStack;
     QStack<Action> redoStack;
-    QGraphicsPixmapItem* m_movingItem;
+    QGraphicsItem* m_movingItem;
     QGraphicsPixmapItem *m_entityPreview;
     QPointF m_oldPosition;
     QVector<QGraphicsLineItem*> m_gridLines;
