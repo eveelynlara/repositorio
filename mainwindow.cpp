@@ -1175,17 +1175,23 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
             if (item && item->flags() & QGraphicsItem::ItemIsMovable) {
                 m_movingItem = dynamic_cast<QGraphicsPixmapItem*>(item);
                 m_oldPosition = m_movingItem->pos();
+                qCDebug(mainWindowCategory) << "Iniciando potencial movimento de item na posição:" << m_oldPosition;
             }
         } else if (event->type() == QEvent::GraphicsSceneMouseRelease) {
             if (m_movingItem) {
-                Action action;
-                action.type = Action::MOVE;
-                action.entity = m_entityPlacements[m_movingItem].entity;
-                action.tileIndex = m_entityPlacements[m_movingItem].tileIndex;
-                action.oldPos = m_oldPosition;
-                action.newPos = m_movingItem->pos();
-                addAction(action);
-
+                QPointF newPosition = m_movingItem->pos();
+                if (newPosition != m_oldPosition) {
+                    Action action;
+                    action.type = Action::MOVE;
+                    action.entity = m_entityPlacements[m_movingItem].entity;
+                    action.tileIndex = m_entityPlacements[m_movingItem].tileIndex;
+                    action.oldPos = m_oldPosition;
+                    action.newPos = newPosition;
+                    addAction(action);
+                    qCDebug(mainWindowCategory) << "Movimento de item finalizado. Nova posição:" << newPosition;
+                } else {
+                    qCDebug(mainWindowCategory) << "Item clicado, mas não movido. Posição:" << newPosition;
+                }
                 m_movingItem = nullptr;
             }
         }
@@ -1743,11 +1749,21 @@ void MainWindow::restorePreservedPreview()
 
 void MainWindow::addAction(const Action& action)
 {
-    undoStack.push(action);
-    redoStack.clear();  // Limpe a pilha de redo apenas quando uma nova ação é adicionada
-    qCInfo(mainWindowCategory) << "Ação adicionada à pilha de undo. Tipo:" << action.type 
-                               << "Posição:" << action.oldPos
-                               << "Entidade:" << action.entityName;
+    if (action.type == Action::ADD || action.type == Action::REMOVE || action.type == Action::MOVE) {
+        if (action.type == Action::MOVE && action.oldPos == action.newPos) {
+            qCDebug(mainWindowCategory) << "Ignorando ação de movimento sem mudança de posição";
+            return;
+        }
+        undoStack.push(action);
+        redoStack.clear();
+        qCInfo(mainWindowCategory) << "Ação adicionada à pilha de undo. Tipo:" << action.type 
+                                   << "Posição:" << (action.type == Action::ADD ? action.newPos : action.oldPos)
+                                   << "Entidade:" << (action.entity ? action.entity->getName() : "Nenhuma")
+                                   << "Tamanho da pilha de undo:" << undoStack.size();
+        qCDebug(mainWindowCategory) << "Ação adicionada em" << QDateTime::currentDateTime().toString("hh:mm:ss.zzz");
+    } else {
+        qCWarning(mainWindowCategory) << "Tentativa de adicionar ação inválida ignorada. Tipo:" << action.type;
+    }
 }
 
 void MainWindow::checkStackConsistency()
