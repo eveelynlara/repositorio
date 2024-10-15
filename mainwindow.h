@@ -36,6 +36,8 @@ public:
     QGraphicsItem* placeEntityInScene(const QPointF &pos, bool addToUndoStack = true, Entity* entity = nullptr, int tileIndex = -1, bool updatePreview = true);
 
 private:
+    QPointF centerToTopLeft(const QPointF& center, const QSizeF& size) const;
+    QPointF topLeftToCenter(const QPointF& topLeft, const QSizeF& size) const;
     void onSelectionChanged();
     Entity* getEntityForGraphicsItem(QGraphicsItem* item);
     QGraphicsItem* m_currentSelectedItem;

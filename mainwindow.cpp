@@ -106,6 +106,8 @@ void MainWindow::eraseEntity()
     if (!m_previewItem) return;
 
     QRectF eraseRect = m_previewItem->sceneBoundingRect();
+    QPointF eraseCenter = eraseRect.center();
+
     QList<QGraphicsItem*> itemsInRect = m_scene->items(eraseRect, Qt::IntersectsItemShape);
     
     QGraphicsItem* itemToErase = nullptr;
@@ -128,11 +130,21 @@ void MainWindow::eraseEntity()
     }
 
     if (itemToErase) {
+        Entity* entity = m_entityPlacements[itemToErase].entity;
+        QSizeF entitySize = entity->getCurrentSize();
+        if (entitySize.isEmpty()) {
+            entitySize = entity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
+            }
+        }
+        QPointF centerPos = topLeftToCenter(itemToErase->pos(), entitySize);
+
         Action action;
         action.type = Action::REMOVE;
-        action.entity = m_entityPlacements[itemToErase].entity;
+        action.entity = entity;
         action.tileIndex = m_entityPlacements[itemToErase].tileIndex;
-        action.oldPos = itemToErase->pos();
+        action.oldPos = centerPos;
         action.entityName = action.entity->getName();
         addAction(action);
 
@@ -140,7 +152,7 @@ void MainWindow::eraseEntity()
         m_entityPlacements.remove(itemToErase);
         delete itemToErase;
         qCInfo(mainWindowCategory) << "Entidade removida e ação adicionada à pilha de undo:" 
-                                   << action.entityName << "na posição:" << action.oldPos
+                                   << action.entityName << "na posição central:" << centerPos
                                    << "Sobreposição:" << (maxOverlapRatio * 100) << "%";
     } else {
         qCInfo(mainWindowCategory) << "Nenhuma entidade para apagar na posição do preview:" << eraseRect;
@@ -236,20 +248,32 @@ void MainWindow::setupUI()
 void MainWindow::updateSelectedEntityPosition()
 {
     if (m_currentTool == SelectTool && m_currentSelectedItem) {
-        QPointF newPos(m_posXSpinBox->value(), m_posYSpinBox->value());
-        QPointF oldPos = m_currentSelectedItem->pos();
-        m_currentSelectedItem->setPos(newPos);
+        QPointF newCenterPos(m_posXSpinBox->value(), m_posYSpinBox->value());
+        
+        Entity* entity = m_entityPlacements[m_currentSelectedItem].entity;
+        QSizeF entitySize = entity->getCurrentSize();
+        if (entitySize.isEmpty()) {
+            entitySize = entity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
+            }
+        }
+        
+        QPointF oldCenterPos = topLeftToCenter(m_currentSelectedItem->pos(), entitySize);
+        QPointF newTopLeftPos = centerToTopLeft(newCenterPos, entitySize);
+        
+        m_currentSelectedItem->setPos(newTopLeftPos);
         m_scene->update();
         
-        Entity* entity = getEntityForGraphicsItem(m_currentSelectedItem);
-        if (entity) {
-            Action action;
-            action.type = Action::MOVE;
-            action.entity = entity;
-            action.oldPos = oldPos;
-            action.newPos = newPos;
-            addAction(action);
-        }
+        Action action;
+        action.type = Action::MOVE;
+        action.entity = entity;
+        action.oldPos = oldCenterPos;
+        action.newPos = newCenterPos;
+        addAction(action);
+        
+        qCInfo(mainWindowCategory) << "Posição da entidade atualizada. Centro antigo:" << oldCenterPos 
+                                   << "Centro novo:" << newCenterPos;
     }
 }
 
@@ -519,6 +543,16 @@ void MainWindow::createActions()
     QMenu *editMenu = menuBar()->addMenu("&Edit");
     editMenu->addAction(undoAction);
     editMenu->addAction(redoAction);
+}
+
+QPointF MainWindow::centerToTopLeft(const QPointF& center, const QSizeF& size) const
+{
+    return center - QPointF(size.width() / 2, size.height() / 2);
+}
+
+QPointF MainWindow::topLeftToCenter(const QPointF& topLeft, const QSizeF& size) const
+{
+    return topLeft + QPointF(size.width() / 2, size.height() / 2);
 }
 
 void MainWindow::activateSelectTool()
@@ -892,7 +926,7 @@ void MainWindow::importScene()
         if (token == QXmlStreamReader::StartElement) {
             if (xml.name().compare(QLatin1String("Entity")) == 0) {
                 QString entityName;
-                QPointF position;
+                QPointF centerPos;
                 int spriteFrame = 0;
 
                 QXmlStreamAttributes attributes = xml.attributes();
@@ -911,29 +945,15 @@ void MainWindow::importScene()
                             QXmlStreamAttributes posAttributes = xml.attributes();
                             qreal x = posAttributes.value(QLatin1String("x")).toDouble();
                             qreal y = posAttributes.value(QLatin1String("y")).toDouble();
-                            position = QPointF(x, y);
+                            centerPos = QPointF(x, y);
                         }
                     }
                 }
 
                 Entity* entity = m_entityManager->getEntityByName(entityName);
                 if (entity) {
-                    QSizeF entitySize = entity->getCurrentSize();
-                    if (entitySize.isEmpty()) {
-                        entitySize = entity->getCollisionSize();
-                        if (entitySize.isEmpty()) {
-                            entitySize = QSizeF(32, 32);
-                        }
-                    }
-                    QPointF correctedPos = position - QPointF(entitySize.width() / 2, entitySize.height() / 2);
-                    
-                    // Verificar se o spriteFrame é válido
-                    if (spriteFrame < 0 || spriteFrame >= entity->getSpriteDefinitions().size()) {
-                        spriteFrame = 0;
-                    }
-                    
-                    // Usar uma função separada para colocar a entidade na cena
-                    placeImportedEntityInScene(correctedPos, entity, spriteFrame);
+                    // Usar a posição centralizada diretamente
+                    placeImportedEntityInScene(centerPos, entity, spriteFrame);
                 } else {
                     qCWarning(mainWindowCategory) << "Entidade não encontrada:" << entityName;
                 }
@@ -953,7 +973,7 @@ void MainWindow::importScene()
     qCInfo(mainWindowCategory) << "Cena importada de:" << m_currentScenePath;    
 }
 
-void MainWindow::placeImportedEntityInScene(const QPointF &pos, Entity* entity, int tileIndex)
+void MainWindow::placeImportedEntityInScene(const QPointF &centerPos, Entity* entity, int tileIndex)
 {
     if (!entity) {
         qCWarning(mainWindowCategory) << "Tentativa de colocar entidade nula na cena";
@@ -968,13 +988,15 @@ void MainWindow::placeImportedEntityInScene(const QPointF &pos, Entity* entity, 
         }
     }
 
+    QPointF topLeftPos = centerToTopLeft(centerPos, entitySize);
+
     QPixmap tilePixmap = createEntityPixmap(entitySize, entity, tileIndex);
     QGraphicsPixmapItem *item = m_scene->addPixmap(tilePixmap);
     if (!item) {
         qCWarning(mainWindowCategory) << "Falha ao adicionar item à cena";
         return;
     }
-    item->setPos(pos);
+    item->setPos(topLeftPos);
     item->setFlag(QGraphicsItem::ItemIsMovable);
     item->setFlag(QGraphicsItem::ItemIsSelectable);
 
@@ -984,7 +1006,7 @@ void MainWindow::placeImportedEntityInScene(const QPointF &pos, Entity* entity, 
     m_entityPlacements[item] = placement;
 
     qCInfo(mainWindowCategory) << "Entidade importada colocada na cena:" << entity->getName() 
-                               << "na posição:" << pos 
+                               << "na posição central:" << centerPos 
                                << "com tile index:" << tileIndex;
 }
 
@@ -999,14 +1021,14 @@ void MainWindow::clearCurrentScene()
     redoStack.clear();
 }
 
-void MainWindow::updatePreviewPosition(const QPointF& scenePos)
+void MainWindow::updatePreviewPosition(const QPointF& sceneCenterPos)
 {
     if (m_currentTool != BrushTool) {
         clearPreview();
         return;
     }
 
-    m_lastCursorPosition = scenePos;
+    m_lastCursorPosition = sceneCenterPos;
     if (!m_selectedEntity || !m_previewItem) {
         if (m_selectedEntity && !m_previewItem) {
             updateEntityPreview();
@@ -1017,42 +1039,39 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
         }
     }
 
-    QPointF adjustedPos = scenePos;
-    if (m_shiftPressed) {
-        QSizeF entitySize = m_selectedEntity->getCurrentSize();
+    QSizeF entitySize = m_selectedEntity->getCurrentSize();
+    if (entitySize.isEmpty()) {
+        entitySize = m_selectedEntity->getCollisionSize();
         if (entitySize.isEmpty()) {
-            entitySize = m_selectedEntity->getCollisionSize();
-            if (entitySize.isEmpty()) {
-                entitySize = QSizeF(32, 32);
-            }
+            entitySize = QSizeF(32, 32);
         }
-        qreal gridX = qRound(scenePos.x() / entitySize.width()) * entitySize.width();
-        qreal gridY = qRound(scenePos.y() / entitySize.height()) * entitySize.height();
+    }
+
+    QPointF adjustedPos = sceneCenterPos;
+
+    if (m_shiftPressed) {
+        // Ajuste para posicionar no centro do quadrado da grid
+        qreal gridX = qFloor(sceneCenterPos.x() / entitySize.width()) * entitySize.width() + entitySize.width() / 2;
+        qreal gridY = qFloor(sceneCenterPos.y() / entitySize.height()) * entitySize.height() + entitySize.height() / 2;
         adjustedPos = QPointF(gridX, gridY);
     }
 
+    QPointF topLeftPos = centerToTopLeft(adjustedPos, entitySize);
+
     if (m_ctrlPressed) {
-        // Usar o mesmo preview de borracha para todos os tipos de entidades
         QPixmap erasePixmap = createErasePreviewPixmap();
         if (QGraphicsPixmapItem* pixmapItem = qgraphicsitem_cast<QGraphicsPixmapItem*>(m_previewItem)) {
             pixmapItem->setPixmap(erasePixmap);
         } else if (QGraphicsRectItem* rectItem = qgraphicsitem_cast<QGraphicsRectItem*>(m_previewItem)) {
-            // Remover o retângulo existente e substituí-lo por um QGraphicsPixmapItem
             m_scene->removeItem(m_previewItem);
             delete m_previewItem;
             m_previewItem = m_scene->addPixmap(erasePixmap);
             m_previewItem->setZValue(1000);
         }
-        adjustedPos -= QPointF(16, 16);  // Centraliza o preview da borracha
-        m_previewItem->setOpacity(1.0);  // Totalmente visível no modo de apagar
+        m_previewItem->setOpacity(1.0);
+        // Ajuste a posição para que o centro da borracha fique no cursor
+        topLeftPos = adjustedPos - QPointF(erasePixmap.width() / 2, erasePixmap.height() / 2);
     } else {
-        QSizeF entitySize = m_selectedEntity->getCurrentSize();
-        if (entitySize.isEmpty()) {
-            entitySize = m_selectedEntity->getCollisionSize();
-            if (entitySize.isEmpty()) {
-                entitySize = QSizeF(32, 32);
-            }
-        }
         if (QGraphicsPixmapItem* pixmapItem = qgraphicsitem_cast<QGraphicsPixmapItem*>(m_previewItem)) {
             pixmapItem->setPixmap(createEntityPixmap(entitySize, m_selectedEntity, m_selectedTileIndex));
         } else if (QGraphicsRectItem* rectItem = qgraphicsitem_cast<QGraphicsRectItem*>(m_previewItem)) {
@@ -1060,15 +1079,15 @@ void MainWindow::updatePreviewPosition(const QPointF& scenePos)
             rectItem->setPen(QPen(Qt::red, 2, Qt::DashLine));
             rectItem->setBrush(Qt::transparent);
         }
-        m_previewItem->setOpacity(0.5);  // Opacidade normal
+        m_previewItem->setOpacity(0.5);
     }
 
-    m_previewItem->setPos(adjustedPos);
+    m_previewItem->setPos(topLeftPos);
     m_previewItem->show();
 
-    /*qCInfo(mainWindowCategory) << "Preview atualizado para posição:" << adjustedPos 
+    qCInfo(mainWindowCategory) << "Preview atualizado para posição central:" << adjustedPos 
                                << "Shift:" << m_shiftPressed 
-                               << "Ctrl:" << m_ctrlPressed;*/
+                               << "Ctrl:" << m_ctrlPressed;
 }
 
 void MainWindow::clearPreviewIfNotBrushTool()
@@ -1209,6 +1228,7 @@ void MainWindow::paintWithBrush(const QPointF &pos)
         return;
     }
 
+    QPointF finalPos = m_previewItem->pos();
     QSizeF entitySize = m_selectedEntity->getCurrentSize();
     if (entitySize.isEmpty()) {
         entitySize = m_selectedEntity->getCollisionSize();
@@ -1216,40 +1236,32 @@ void MainWindow::paintWithBrush(const QPointF &pos)
             entitySize = QSizeF(32, 32);
         }
     }
+    
+    QPointF centerPos = topLeftToCenter(finalPos, entitySize);
 
-    QPointF finalPos = pos;
-    QPair<int, int> gridPos;
+    QPair<int, int> gridPos = qMakePair(qRound(centerPos.x()), qRound(centerPos.y()));
 
-    if (m_shiftPressed) {
-        int gridX = qRound(pos.x() / entitySize.width());
-        int gridY = qRound(pos.y() / entitySize.height());
-        gridPos = qMakePair(gridX, gridY);
-        finalPos = QPointF(gridX * entitySize.width(), gridY * entitySize.height());
-    } else {
-        gridPos = qMakePair(qRound(pos.x()), qRound(pos.y()));
-    }
-
-    qCInfo(mainWindowCategory) << "paintWithBrush: Tentando colocar entidade em" << finalPos << "Modo de pintura:" << m_paintingMode;
+    qCInfo(mainWindowCategory) << "paintWithBrush: Tentando colocar entidade em" << centerPos << "Modo de pintura:" << m_paintingMode;
 
     bool canPlace = true;
 
     if (m_paintingMode && m_occupiedPositions.contains(gridPos)) {
-        qCInfo(mainWindowCategory) << "Entidade já existe na posição:" << finalPos << "(Modo de pintura)";
+        qCInfo(mainWindowCategory) << "Entidade já existe na posição:" << centerPos << "(Modo de pintura)";
         canPlace = false;
     }
 
     if (canPlace) {
-        QGraphicsItem* newItem = placeEntityInScene(finalPos);
+        QGraphicsItem* newItem = placeEntityInScene(centerPos, true, m_selectedEntity, m_selectedTileIndex, false);
         if (newItem) {
             qCInfo(mainWindowCategory) << "Nova entidade adicionada na posição:" << newItem->pos();
             if (m_paintingMode) {
                 m_occupiedPositions.insert(gridPos, true);
             }
         } else {
-            qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << finalPos;
+            qCWarning(mainWindowCategory) << "Falha ao adicionar nova entidade na posição:" << centerPos;
         }
     } else {
-        qCInfo(mainWindowCategory) << "Não foi possível colocar a entidade na posição:" << finalPos;
+        qCInfo(mainWindowCategory) << "Não foi possível colocar a entidade na posição:" << centerPos;
     }
 }
 
@@ -1426,7 +1438,7 @@ void MainWindow::onSceneViewMousePress(QMouseEvent *event)
     }
 }
 
-QGraphicsItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndoStack, Entity* entity, int tileIndex, bool updatePreview)
+QGraphicsItem* MainWindow::placeEntityInScene(const QPointF &centerPos, bool addToUndoStack, Entity* entity, int tileIndex, bool updatePreview)
 {
     if (!entity) {
         entity = m_selectedEntity;
@@ -1438,13 +1450,9 @@ QGraphicsItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndo
         return nullptr;
     }
 
-    if (updatePreview) {
-        updateEntityPreview();
-    }
-
     try {
         qCInfo(mainWindowCategory) << "Iniciando colocação de entidade:" << entity->getName();
-        qCInfo(mainWindowCategory) << "Posição inicial:" << pos;
+        qCInfo(mainWindowCategory) << "Posição central inicial:" << centerPos;
         qCInfo(mainWindowCategory) << "Entidade é invisível:" << entity->isInvisible();
 
         QSizeF entitySize = entity->getCurrentSize();
@@ -1455,20 +1463,23 @@ QGraphicsItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndo
             }
         }
 
-        QPointF finalPos = pos;
+        QPointF finalCenterPos = centerPos;
         
         if (m_shiftPressed) {
-            qreal gridX = qRound(pos.x() / entitySize.width()) * entitySize.width();
-            qreal gridY = qRound(pos.y() / entitySize.height()) * entitySize.height();
-            finalPos = QPointF(gridX, gridY);
+            // Use a mesma lógica de posicionamento que no updatePreviewPosition
+            qreal gridX = qFloor(centerPos.x() / entitySize.width()) * entitySize.width() + entitySize.width() / 2;
+            qreal gridY = qFloor(centerPos.y() / entitySize.height()) * entitySize.height() + entitySize.height() / 2;
+            finalCenterPos = QPointF(gridX, gridY);
         }
+
+        QPointF topLeftPos = centerToTopLeft(finalCenterPos, entitySize);
 
         QGraphicsItem* item;
         if (entity->isInvisible()) {
             QGraphicsRectItem* invisibleItem = new QGraphicsRectItem(QRectF(0, 0, entitySize.width(), entitySize.height()));
             invisibleItem->setPen(QPen(Qt::red, 2, Qt::DashLine));
             invisibleItem->setBrush(Qt::transparent);
-            invisibleItem->setPos(finalPos);
+            invisibleItem->setPos(topLeftPos);
             invisibleItem->setFlag(QGraphicsItem::ItemIsSelectable);
             invisibleItem->setFlag(QGraphicsItem::ItemIsMovable);
             m_scene->addItem(invisibleItem);
@@ -1476,7 +1487,7 @@ QGraphicsItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndo
         } else {
             QPixmap tilePixmap = createEntityPixmap(entitySize, entity, tileIndex);
             QGraphicsPixmapItem *pixmapItem = m_scene->addPixmap(tilePixmap);
-            pixmapItem->setPos(finalPos);
+            pixmapItem->setPos(topLeftPos);
             pixmapItem->setFlag(QGraphicsItem::ItemIsMovable);
             pixmapItem->setFlag(QGraphicsItem::ItemIsSelectable);
             item = pixmapItem;
@@ -1488,17 +1499,14 @@ QGraphicsItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndo
         placement.item = item;
         m_entityPlacements[item] = placement;
         qCInfo(mainWindowCategory) << "Entidade adicionada ao m_entityPlacements:" 
-                           << entity->getName() << "na posição:" << item->pos();
+                           << entity->getName() << "na posição central:" << finalCenterPos;
 
-        // qCInfo(mainWindowCategory) << "Placement adicionado ao mapa de entidades. Total de placements:" << m_entityPlacements.size();
-
-        // Adicionar ação para Undo/Redo apenas se addToUndoStack for true
         if (addToUndoStack) {
             Action action;
             action.type = Action::ADD;
             action.entity = entity;
             action.tileIndex = tileIndex;
-            action.newPos = finalPos;
+            action.newPos = finalCenterPos;
             addAction(action);
             qCInfo(mainWindowCategory) << "Ação adicionada para Undo/Redo. Tamanho da pilha de undo:" << undoStack.size();
         }
@@ -1506,11 +1514,12 @@ QGraphicsItem* MainWindow::placeEntityInScene(const QPointF &pos, bool addToUndo
         updateGrid();
         qCInfo(mainWindowCategory) << "Grade atualizada";
 
-        // Atualizar o preview após colocar a entidade
-        updateEntityPreview();
-        qCInfo(mainWindowCategory) << "Preview da entidade atualizado";
+        if (updatePreview) {
+            updateEntityPreview();
+            qCInfo(mainWindowCategory) << "Preview da entidade atualizado";
+        }
 
-        qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição:" << finalPos << "com tamanho:" << entitySize;
+        qCInfo(mainWindowCategory) << "Entidade colocada na cena na posição central:" << finalCenterPos << "com tamanho:" << entitySize;
         logToFile("Entidade colocada na cena: " + entity->getName());
 
         qCInfo(mainWindowCategory) << "Método placeEntityInScene concluído com sucesso";
@@ -1688,12 +1697,20 @@ bool MainWindow::undo()
         case Action::ADD:
             {
                 for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                    if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
+                    QSizeF entitySize = it.value().entity->getCurrentSize();
+                    if (entitySize.isEmpty()) {
+                        entitySize = it.value().entity->getCollisionSize();
+                        if (entitySize.isEmpty()) {
+                            entitySize = QSizeF(32, 32);
+                        }
+                    }
+                    QPointF itemCenter = topLeftToCenter(it.key()->pos(), entitySize);
+                    if (itemCenter == action.newPos && it.value().entity == action.entity) {
                         QGraphicsItem* item = it.key();
                         m_scene->removeItem(item);
                         m_entityPlacements.erase(it);
                         delete item;
-                        qCInfo(mainWindowCategory) << "Entidade removida da cena na posição:" << action.newPos;
+                        qCInfo(mainWindowCategory) << "Entidade removida da cena na posição central:" << action.newPos;
                         break;
                     }
                 }
@@ -1704,16 +1721,25 @@ bool MainWindow::undo()
                 QGraphicsItem* newItem = placeEntityInScene(action.oldPos, false, action.entity, action.tileIndex);
                 if (newItem) {
                     qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entity->getName()
-                                               << "na posição:" << action.oldPos;
+                                               << "na posição central:" << action.oldPos;
                 }
             }
             break;
         case Action::MOVE:
             {
                 for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                    if (it.key()->pos() == action.newPos && it.value().entity == action.entity) {
-                        it.key()->setPos(action.oldPos);
-                        qCInfo(mainWindowCategory) << "Entidade movida de volta para a posição:" << action.oldPos;
+                    QSizeF entitySize = it.value().entity->getCurrentSize();
+                    if (entitySize.isEmpty()) {
+                        entitySize = it.value().entity->getCollisionSize();
+                        if (entitySize.isEmpty()) {
+                            entitySize = QSizeF(32, 32);
+                        }
+                    }
+                    QPointF itemCenter = topLeftToCenter(it.key()->pos(), entitySize);
+                    if (itemCenter == action.newPos && it.value().entity == action.entity) {
+                        QPointF newTopLeft = centerToTopLeft(action.oldPos, entitySize);
+                        it.key()->setPos(newTopLeft);
+                        qCInfo(mainWindowCategory) << "Entidade movida de volta para a posição central:" << action.oldPos;
                         break;
                     }
                 }
@@ -1745,19 +1771,27 @@ bool MainWindow::redo()
                 QGraphicsItem* newItem = placeEntityInScene(action.newPos, false, action.entity, action.tileIndex);
                 if (newItem) {
                     qCInfo(mainWindowCategory) << "Entidade restaurada na cena:" << action.entity->getName()
-                                               << "na posição:" << action.newPos;
+                                               << "na posição central:" << action.newPos;
                 }
             }
             break;
         case Action::REMOVE:
             {
                 for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                    if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
+                    QSizeF entitySize = it.value().entity->getCurrentSize();
+                    if (entitySize.isEmpty()) {
+                        entitySize = it.value().entity->getCollisionSize();
+                        if (entitySize.isEmpty()) {
+                            entitySize = QSizeF(32, 32);
+                        }
+                    }
+                    QPointF itemCenter = topLeftToCenter(it.key()->pos(), entitySize);
+                    if (itemCenter == action.oldPos && it.value().entity == action.entity) {
                         QGraphicsItem* item = it.key();
                         m_scene->removeItem(item);
                         m_entityPlacements.erase(it);
                         delete item;
-                        qCInfo(mainWindowCategory) << "Entidade removida da cena na posição:" << action.oldPos;
+                        qCInfo(mainWindowCategory) << "Entidade removida da cena na posição central:" << action.oldPos;
                         break;
                     }
                 }
@@ -1766,9 +1800,18 @@ bool MainWindow::redo()
         case Action::MOVE:
             {
                 for (auto it = m_entityPlacements.begin(); it != m_entityPlacements.end(); ++it) {
-                    if (it.key()->pos() == action.oldPos && it.value().entity == action.entity) {
-                        it.key()->setPos(action.newPos);
-                        qCInfo(mainWindowCategory) << "Entidade movida para a posição:" << action.newPos;
+                    QSizeF entitySize = it.value().entity->getCurrentSize();
+                    if (entitySize.isEmpty()) {
+                        entitySize = it.value().entity->getCollisionSize();
+                        if (entitySize.isEmpty()) {
+                            entitySize = QSizeF(32, 32);
+                        }
+                    }
+                    QPointF itemCenter = topLeftToCenter(it.key()->pos(), entitySize);
+                    if (itemCenter == action.oldPos && it.value().entity == action.entity) {
+                        QPointF newTopLeft = centerToTopLeft(action.newPos, entitySize);
+                        it.key()->setPos(newTopLeft);
+                        qCInfo(mainWindowCategory) << "Entidade movida para a posição central:" << action.newPos;
                         break;
                     }
                 }
@@ -1937,7 +1980,6 @@ void MainWindow::saveScene()
 
                 xml.writeTextElement("EntityName", entity->getName() + ".ent");
 
-                // Calcular a posição corrigida
                 QSizeF entitySize = entity->getCurrentSize();
                 if (entitySize.isEmpty()) {
                     entitySize = entity->getCollisionSize();
@@ -1945,11 +1987,11 @@ void MainWindow::saveScene()
                         entitySize = QSizeF(32, 32);
                     }
                 }
-                QPointF correctedPos = pixmapItem->pos() + QPointF(entitySize.width() / 2, entitySize.height() / 2);
+                QPointF centerPos = topLeftToCenter(pixmapItem->pos(), entitySize);
 
                 xml.writeStartElement("Position");
-                xml.writeAttribute("x", QString::number(static_cast<int>(correctedPos.x())));
-                xml.writeAttribute("y", QString::number(static_cast<int>(correctedPos.y())));
+                xml.writeAttribute("x", QString::number(static_cast<int>(centerPos.x())));
+                xml.writeAttribute("y", QString::number(static_cast<int>(centerPos.y())));
                 xml.writeAttribute("z", "0");
                 xml.writeAttribute("angle", "0");
                 xml.writeEndElement(); // Position
@@ -2124,9 +2166,16 @@ void MainWindow::handleTileItemClick(QLabel* spritesheetLabel, const QPoint& pos
 void MainWindow::updatePropertiesPanel()
 {
     if (m_currentTool == SelectTool && m_currentSelectedItem) {
-        QPointF pos = m_currentSelectedItem->pos();
-        m_posXSpinBox->setValue(pos.x());
-        m_posYSpinBox->setValue(pos.y());
+        QSizeF entitySize = m_entityPlacements[m_currentSelectedItem].entity->getCurrentSize();
+        if (entitySize.isEmpty()) {
+            entitySize = m_entityPlacements[m_currentSelectedItem].entity->getCollisionSize();
+            if (entitySize.isEmpty()) {
+                entitySize = QSizeF(32, 32);
+            }
+        }
+        QPointF centerPos = topLeftToCenter(m_currentSelectedItem->pos(), entitySize);
+        m_posXSpinBox->setValue(centerPos.x());
+        m_posYSpinBox->setValue(centerPos.y());
         m_propertiesDock->setEnabled(true);
     } else {
         m_propertiesDock->setEnabled(false);
