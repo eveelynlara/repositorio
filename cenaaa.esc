@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Ethanon>
+    <SceneProperties lightIntensity="2" parallaxIntensity="0">
+        <Ambient r="1" g="1" b="1"/>
+        <ZAxisDirection x="0" y="-1"/>
+    </SceneProperties>
+    <EntitiesInScene/>
+</Ethanon>

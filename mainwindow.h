@@ -36,6 +36,7 @@ public:
     QGraphicsItem* placeEntityInScene(const QPointF &pos, bool addToUndoStack = true, Entity* entity = nullptr, int tileIndex = -1, bool updatePreview = true);
 
 private:
+    void saveSceneToFile(const QString &fileName);
     QPointF centerToTopLeft(const QPointF& center, const QSizeF& size) const;
     QPointF topLeftToCenter(const QPointF& topLeft, const QSizeF& size) const;
     void onSelectionChanged();
@@ -145,7 +146,8 @@ private:
     void updatePaintingMode();
     void preserveCurrentPreview();
     void restorePreservedPreview();
-    void placeImportedEntityInScene(const QPointF &pos, Entity* entity, int tileIndex);
+    void placeImportedEntityInScene(const QPointF &centerPos, Entity* entity, int tileIndex);
+    void verifyEntityPosition(QGraphicsItem* item, const QPointF& expectedCenterPos);
     
     Entity* getEntityForPixmapItem(QGraphicsPixmapItem* item);
     int getTileIndexForPixmapItem(QGraphicsPixmapItem* item);
@@ -167,7 +169,9 @@ protected:
     void enterEvent(QEnterEvent *event) override;
 
 public slots:
-    void importScene();  
+    void openScene();
+    void saveScene();
+    void saveSceneAs();
 
 private slots:
     void clearCurrentScene();
@@ -175,9 +179,6 @@ private slots:
     void onEntityItemClicked(QListWidgetItem *item);
     void onTileItemClicked(QListWidgetItem *item);
     void updatePreviewContinuously();
-    void exportScene();
-    void saveScene();
-    void saveSceneAs();
     void onSceneViewMousePress(QMouseEvent *event);
     void onSceneViewMouseMove(QMouseEvent *event);
     void updateShiftState(bool pressed);

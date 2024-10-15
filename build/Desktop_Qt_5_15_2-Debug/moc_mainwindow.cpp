@@ -37,8 +37,10 @@ namespace {
 struct qt_meta_stringdata_CLASSMainWindowENDCLASS_t {};
 constexpr auto qt_meta_stringdata_CLASSMainWindowENDCLASS = QtMocHelpers::stringData(
     "MainWindow",
-    "importScene",
+    "openScene",
     "",
+    "saveScene",
+    "saveSceneAs",
     "clearCurrentScene",
     "onProjectItemDoubleClicked",
     "QModelIndex",
@@ -48,9 +50,6 @@ constexpr auto qt_meta_stringdata_CLASSMainWindowENDCLASS = QtMocHelpers::string
     "item",
     "onTileItemClicked",
     "updatePreviewContinuously",
-    "exportScene",
-    "saveScene",
-    "saveSceneAs",
     "onSceneViewMousePress",
     "QMouseEvent*",
     "event",
@@ -72,7 +71,7 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSMainWindowENDCLASS[] = {
       12,       // revision
        0,       // classname
        0,    0, // classinfo
-      15,   14, // methods
+      14,   14, // methods
        0,    0, // properties
        0,    0, // enums/sets
        0,    0, // constructors
@@ -80,35 +79,33 @@ Q_CONSTINIT static const uint qt_meta_data_CLASSMainWindowENDCLASS[] = {
        0,       // signalCount
 
  // slots: name, argc, parameters, tag, flags, initial metatype offsets
-       1,    0,  104,    2, 0x0a,    1 /* Public */,
-       3,    0,  105,    2, 0x08,    2 /* Private */,
-       4,    1,  106,    2, 0x08,    3 /* Private */,
-       7,    1,  109,    2, 0x08,    5 /* Private */,
-      10,    1,  112,    2, 0x08,    7 /* Private */,
-      11,    0,  115,    2, 0x08,    9 /* Private */,
-      12,    0,  116,    2, 0x08,   10 /* Private */,
-      13,    0,  117,    2, 0x08,   11 /* Private */,
-      14,    0,  118,    2, 0x08,   12 /* Private */,
-      15,    1,  119,    2, 0x08,   13 /* Private */,
-      18,    1,  122,    2, 0x08,   15 /* Private */,
-      19,    1,  125,    2, 0x08,   17 /* Private */,
-      21,    0,  128,    2, 0x08,   19 /* Private */,
-      22,    0,  129,    2, 0x08,   20 /* Private */,
-      23,    0,  130,    2, 0x08,   21 /* Private */,
+       1,    0,   98,    2, 0x0a,    1 /* Public */,
+       3,    0,   99,    2, 0x0a,    2 /* Public */,
+       4,    0,  100,    2, 0x0a,    3 /* Public */,
+       5,    0,  101,    2, 0x08,    4 /* Private */,
+       6,    1,  102,    2, 0x08,    5 /* Private */,
+       9,    1,  105,    2, 0x08,    7 /* Private */,
+      12,    1,  108,    2, 0x08,    9 /* Private */,
+      13,    0,  111,    2, 0x08,   11 /* Private */,
+      14,    1,  112,    2, 0x08,   12 /* Private */,
+      17,    1,  115,    2, 0x08,   14 /* Private */,
+      18,    1,  118,    2, 0x08,   16 /* Private */,
+      20,    0,  121,    2, 0x08,   18 /* Private */,
+      21,    0,  122,    2, 0x08,   19 /* Private */,
+      22,    0,  123,    2, 0x08,   20 /* Private */,
 
  // slots: parameters
     QMetaType::Void,
     QMetaType::Void,
-    QMetaType::Void, 0x80000000 | 5,    6,
-    QMetaType::Void, 0x80000000 | 8,    9,
-    QMetaType::Void, 0x80000000 | 8,    9,
     QMetaType::Void,
     QMetaType::Void,
+    QMetaType::Void, 0x80000000 | 7,    8,
+    QMetaType::Void, 0x80000000 | 10,   11,
+    QMetaType::Void, 0x80000000 | 10,   11,
     QMetaType::Void,
-    QMetaType::Void,
-    QMetaType::Void, 0x80000000 | 16,   17,
-    QMetaType::Void, 0x80000000 | 16,   17,
-    QMetaType::Void, QMetaType::Bool,   20,
+    QMetaType::Void, 0x80000000 | 15,   16,
+    QMetaType::Void, 0x80000000 | 15,   16,
+    QMetaType::Void, QMetaType::Bool,   19,
     QMetaType::Void,
     QMetaType::Void,
     QMetaType::Void,
@@ -125,7 +122,11 @@ Q_CONSTINIT const QMetaObject MainWindow::staticMetaObject = { {
     qt_incomplete_metaTypeArray<qt_meta_stringdata_CLASSMainWindowENDCLASS_t,
         // Q_OBJECT / Q_GADGET
         QtPrivate::TypeAndForceComplete<MainWindow, std::true_type>,
-        // method 'importScene'
+        // method 'openScene'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'saveScene'
+        QtPrivate::TypeAndForceComplete<void, std::false_type>,
+        // method 'saveSceneAs'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'clearCurrentScene'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
@@ -139,12 +140,6 @@ Q_CONSTINIT const QMetaObject MainWindow::staticMetaObject = { {
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         QtPrivate::TypeAndForceComplete<QListWidgetItem *, std::false_type>,
         // method 'updatePreviewContinuously'
-        QtPrivate::TypeAndForceComplete<void, std::false_type>,
-        // method 'exportScene'
-        QtPrivate::TypeAndForceComplete<void, std::false_type>,
-        // method 'saveScene'
-        QtPrivate::TypeAndForceComplete<void, std::false_type>,
-        // method 'saveSceneAs'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
         // method 'onSceneViewMousePress'
         QtPrivate::TypeAndForceComplete<void, std::false_type>,
@@ -171,21 +166,20 @@ void MainWindow::qt_static_metacall(QObject *_o, QMetaObject::Call _c, int _id, 
         auto *_t = static_cast<MainWindow *>(_o);
         (void)_t;
         switch (_id) {
-        case 0: _t->importScene(); break;
-        case 1: _t->clearCurrentScene(); break;
-        case 2: _t->onProjectItemDoubleClicked((*reinterpret_cast< std::add_pointer_t<QModelIndex>>(_a[1]))); break;
-        case 3: _t->onEntityItemClicked((*reinterpret_cast< std::add_pointer_t<QListWidgetItem*>>(_a[1]))); break;
-        case 4: _t->onTileItemClicked((*reinterpret_cast< std::add_pointer_t<QListWidgetItem*>>(_a[1]))); break;
-        case 5: _t->updatePreviewContinuously(); break;
-        case 6: _t->exportScene(); break;
-        case 7: _t->saveScene(); break;
-        case 8: _t->saveSceneAs(); break;
-        case 9: _t->onSceneViewMousePress((*reinterpret_cast< std::add_pointer_t<QMouseEvent*>>(_a[1]))); break;
-        case 10: _t->onSceneViewMouseMove((*reinterpret_cast< std::add_pointer_t<QMouseEvent*>>(_a[1]))); break;
-        case 11: _t->updateShiftState((*reinterpret_cast< std::add_pointer_t<bool>>(_a[1]))); break;
-        case 12: _t->removeSelectedEntities(); break;
-        case 13: _t->activateSelectTool(); break;
-        case 14: _t->activateBrushTool(); break;
+        case 0: _t->openScene(); break;
+        case 1: _t->saveScene(); break;
+        case 2: _t->saveSceneAs(); break;
+        case 3: _t->clearCurrentScene(); break;
+        case 4: _t->onProjectItemDoubleClicked((*reinterpret_cast< std::add_pointer_t<QModelIndex>>(_a[1]))); break;
+        case 5: _t->onEntityItemClicked((*reinterpret_cast< std::add_pointer_t<QListWidgetItem*>>(_a[1]))); break;
+        case 6: _t->onTileItemClicked((*reinterpret_cast< std::add_pointer_t<QListWidgetItem*>>(_a[1]))); break;
+        case 7: _t->updatePreviewContinuously(); break;
+        case 8: _t->onSceneViewMousePress((*reinterpret_cast< std::add_pointer_t<QMouseEvent*>>(_a[1]))); break;
+        case 9: _t->onSceneViewMouseMove((*reinterpret_cast< std::add_pointer_t<QMouseEvent*>>(_a[1]))); break;
+        case 10: _t->updateShiftState((*reinterpret_cast< std::add_pointer_t<bool>>(_a[1]))); break;
+        case 11: _t->removeSelectedEntities(); break;
+        case 12: _t->activateSelectTool(); break;
+        case 13: _t->activateBrushTool(); break;
         default: ;
         }
     }
@@ -210,13 +204,13 @@ int MainWindow::qt_metacall(QMetaObject::Call _c, int _id, void **_a)
     if (_id < 0)
         return _id;
     if (_c == QMetaObject::InvokeMetaMethod) {
-        if (_id < 15)
+        if (_id < 14)
             qt_static_metacall(this, _c, _id, _a);
-        _id -= 15;
+        _id -= 14;
     } else if (_c == QMetaObject::RegisterMethodArgumentMetaType) {
-        if (_id < 15)
+        if (_id < 14)
             *reinterpret_cast<QMetaType *>(_a[0]) = QMetaType();
-        _id -= 15;
+        _id -= 14;
     }
     return _id;
 }
