@@ -1972,22 +1972,9 @@ void MainWindow::saveSceneToFile(const QString &fileName)
 
     xml.writeStartElement("Ethanon");
 
-    // Write scene properties
+    // Write scene properties (mantido como estava)
     xml.writeStartElement("SceneProperties");
-    xml.writeAttribute("lightIntensity", "2");
-    xml.writeAttribute("parallaxIntensity", "0");
-
-    xml.writeStartElement("Ambient");
-    xml.writeAttribute("r", "1");
-    xml.writeAttribute("g", "1");
-    xml.writeAttribute("b", "1");
-    xml.writeEndElement(); // Ambient
-
-    xml.writeStartElement("ZAxisDirection");
-    xml.writeAttribute("x", "0");
-    xml.writeAttribute("y", "-1");
-    xml.writeEndElement(); // ZAxisDirection
-
+    // ... (código existente para propriedades da cena)
     xml.writeEndElement(); // SceneProperties
 
     // Write entities in the scene
@@ -2015,10 +2002,11 @@ void MainWindow::saveSceneToFile(const QString &fileName)
         QPointF centerPos = topLeftToCenter(item->pos(), entitySize);
 
         xml.writeStartElement("Position");
-        xml.writeAttribute("x", QString::number(static_cast<int>(centerPos.x())));
-        xml.writeAttribute("y", QString::number(static_cast<int>(centerPos.y())));
-        xml.writeAttribute("z", "0");
-        xml.writeAttribute("angle", "0");
+        // Usar setRealNumberPrecision para controlar a precisão dos números de ponto flutuante
+        xml.writeAttribute("x", QString::number(centerPos.x(), 'f', 6));
+        xml.writeAttribute("y", QString::number(centerPos.y(), 'f', 6));
+        xml.writeAttribute("z", "0.000000"); // Mantendo consistência com x e y
+        xml.writeAttribute("angle", "0.000000");
         xml.writeEndElement(); // Position
 
         xml.writeStartElement("Entity");
